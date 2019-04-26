@@ -25,7 +25,6 @@ import multiprocessing
 import re
 import signal
 from pickle import PicklingError
-import dill
 from xml.etree.cElementTree import \
     iterparse  # LXML isn't faster, so let's go with the built-in solution
 
@@ -493,10 +492,10 @@ def process_article(args, tokenizer_func=tokenize, token_min_len=TOKEN_MIN_LEN,
         List of tokens from article, title and page id.
 
     """
-    text, lemmatizer_func, title, pageid = args
+    text, lemmatizer_func, language, title, pageid = args
     text = filter_wiki(text)
     if lemmatizer_func:
-        result = lemmatizer_func(text)
+        result = lemmatizer_func(text, language)
     else:
         result = tokenizer_func(text, token_min_len, token_max_len, lower)
     return result, title, pageid
@@ -582,7 +581,7 @@ class WikiCorpus(TextCorpus):
     """
     def __init__(self, fname, processes=None, lemmatizer_func=None, dictionary=None,
                  filter_namespaces=('0',), tokenizer_func=tokenize, article_min_tokens=ARTICLE_MIN_WORDS,
-                 token_min_len=TOKEN_MIN_LEN, token_max_len=TOKEN_MAX_LEN, lower=True, filter_articles=None):
+                 token_min_len=TOKEN_MIN_LEN, token_max_len=TOKEN_MAX_LEN, lower=True, filter_articles=None, language='en'):
         """Initialize the corpus.
 
         Unless a dictionary is provided, this scans the corpus once,
@@ -635,6 +634,7 @@ class WikiCorpus(TextCorpus):
             self.lemmatizer_func = lemmatizer_func
         elif utils.has_pattern():
             self.lemmatizer_func = lemmatize
+        self.language = language
         self.tokenizer_func = tokenizer_func
         self.article_min_tokens = article_min_tokens
         self.token_min_len = token_min_len
@@ -682,7 +682,7 @@ class WikiCorpus(TextCorpus):
 
         tokenization_params = (self.tokenizer_func, self.token_min_len, self.token_max_len, self.lower)
         texts = \
-            ((text, self.lemmatizer_func, title, pageid, tokenization_params)
+            ((text, self.lemmatizer_func, self.language, title, pageid, tokenization_params)
              for title, text, pageid
              in extract_pages(bz2.BZ2File(self.fname), self.filter_namespaces, self.filter_articles))
         pool = multiprocessing.Pool(self.processes, init_to_ignore_interrupt)
