@@ -314,7 +314,7 @@ setup(
 
     url='http://radimrehurek.com/gensim',
     download_url='http://pypi.python.org/pypi/gensim',
-    
+
     license='LGPLv2.1',
 
     keywords='Singular Value Decomposition, SVD, Latent Semantic Indexing, '
@@ -350,6 +350,7 @@ setup(
         'scipy >= 0.18.1',
         'six >= 1.5.0',
         'smart_open >= 1.7.0',
+        'dill >= 0.2.9'
     ],
     tests_require=linux_testenv,
     extras_require={
