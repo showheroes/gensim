@@ -336,6 +336,11 @@ def remove_file(s):
         s = s.replace(m, caption, 1)
     return s
 
+def lemmatize(content):
+    if utils.has_pattern():
+        return utils.lemmatize(content)
+    return utils.tokenize(content, lower=True, errors='ignore')
+
 
 def tokenize(content, token_min_len=TOKEN_MIN_LEN, token_max_len=TOKEN_MAX_LEN, lower=True):
     """Tokenize a piece of text from Wikipedia.
@@ -574,7 +579,7 @@ class WikiCorpus(TextCorpus):
         >>> MmCorpus.serialize(corpus_path, wiki)  # another 8h, creates a file in MatrixMarket format and mapping
 
     """
-    def __init__(self, fname, processes=None, lemmatize=utils.has_pattern(), dictionary=None,
+    def __init__(self, fname, processes=None, lemmatizer_func=lemmatize, dictionary=None,
                  filter_namespaces=('0',), tokenizer_func=tokenize, article_min_tokens=ARTICLE_MIN_WORDS,
                  token_min_len=TOKEN_MIN_LEN, token_max_len=TOKEN_MAX_LEN, lower=True, filter_articles=None):
         """Initialize the corpus.
@@ -625,7 +630,7 @@ class WikiCorpus(TextCorpus):
         if processes is None:
             processes = max(1, multiprocessing.cpu_count() - 1)
         self.processes = processes
-        self.lemmatize = lemmatize
+        self.lemmatizer_func = lemmatize
         self.tokenizer_func = tokenizer_func
         self.article_min_tokens = article_min_tokens
         self.token_min_len = token_min_len
