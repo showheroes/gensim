@@ -492,10 +492,10 @@ def process_article(args, tokenizer_func=tokenize, token_min_len=TOKEN_MIN_LEN,
         List of tokens from article, title and page id.
 
     """
-    text, lemmatize, title, pageid = args
+    text, lemmatizer_func, title, pageid = args
     text = filter_wiki(text)
-    if lemmatize:
-        result = utils.lemmatize(text)
+    if lemmatizer_func:
+        result = lemmatizer_func(text)
     else:
         result = tokenizer_func(text, token_min_len, token_max_len, lower)
     return result, title, pageid
@@ -579,7 +579,7 @@ class WikiCorpus(TextCorpus):
         >>> MmCorpus.serialize(corpus_path, wiki)  # another 8h, creates a file in MatrixMarket format and mapping
 
     """
-    def __init__(self, fname, processes=None, lemmatizer_func=lemmatize, dictionary=None,
+    def __init__(self, fname, processes=None, lemmatizer_func=None, dictionary=None,
                  filter_namespaces=('0',), tokenizer_func=tokenize, article_min_tokens=ARTICLE_MIN_WORDS,
                  token_min_len=TOKEN_MIN_LEN, token_max_len=TOKEN_MAX_LEN, lower=True, filter_articles=None):
         """Initialize the corpus.
@@ -630,7 +630,10 @@ class WikiCorpus(TextCorpus):
         if processes is None:
             processes = max(1, multiprocessing.cpu_count() - 1)
         self.processes = processes
-        self.lemmatizer_func = lemmatize
+        if lemmatizer_func:
+            self.lemmatizer_func = lemmatizer_func
+        elif utils.has_pattern():
+            self.lemmatizer_func = lemmatize
         self.tokenizer_func = tokenizer_func
         self.article_min_tokens = article_min_tokens
         self.token_min_len = token_min_len
@@ -678,7 +681,7 @@ class WikiCorpus(TextCorpus):
 
         tokenization_params = (self.tokenizer_func, self.token_min_len, self.token_max_len, self.lower)
         texts = \
-            ((text, self.lemmatize, title, pageid, tokenization_params)
+            ((text, self.lemmatizer_func, title, pageid, tokenization_params)
              for title, text, pageid
              in extract_pages(bz2.BZ2File(self.fname), self.filter_namespaces, self.filter_articles))
         pool = multiprocessing.Pool(self.processes, init_to_ignore_interrupt)
