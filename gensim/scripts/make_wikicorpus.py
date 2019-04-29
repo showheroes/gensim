@@ -44,12 +44,53 @@ import sys
 
 from gensim.corpora import Dictionary, HashDictionary, MmCorpus, WikiCorpus
 from gensim.models import TfidfModel
-
+import gensim.utils as gu
+from adhero.core.nlp.utils import Stopwords
 
 # Wiki is first scanned for all distinct word types (~7M). The types that
 # appear in more than 10% of articles are removed and from the rest, the
 # DEFAULT_DICT_SIZE most frequent types are kept.
 DEFAULT_DICT_SIZE = 100000
+sw_class = Stopwords()
+language_codes = {
+    'german' : 'de',
+    'english' : 'en',
+    'french' : 'fr',
+    'dutch' : 'nl',
+    'russian' : 'ru'
+}
+
+
+def my_lemmatize(content, min_len, max_len, language):
+    lc = language_codes[language]
+    #special case english
+    if lc == 'en':
+        nlp = space.load('en_core_web_sm')
+    else:
+        nlp = spacy.load(f'{lc}_core_news_sm')
+
+    stopwords = sw_class[language]
+    # lang_class = spu.get_lang_class(language_codes[language])
+    # lang = lang_class()
+    # lemmatizer = lang.Defaults.create_lemmatizer()
+
+    doc = nlp(content)
+    # content = gu.tokenize(content, lower=True, errors='ignore')
+    ret_val = []
+    # lemmas = list(map(lemmatizer, content))
+    non_words = re.compile('[^\W]')
+    for token in doc:
+        l = token.lemma_.strip()
+        l = non_words.sub('', l)
+        l = re.sub(r'\s+', ' ', l)
+        l = l.strip()
+        if not l:
+            continue
+        l = l.lower()
+        if min_len <= len(l) <= max_len and token.text not in stopwords and l not in stopwords and not token.is_stop:
+            ret_val.append(l)
+
+    return ret_val
 
 
 if __name__ == '__main__':
@@ -73,9 +114,13 @@ if __name__ == '__main__':
         keep_words = int(sys.argv[3])
     else:
         keep_words = DEFAULT_DICT_SIZE
+
+    language = sys.argv[4]
     online = 'online' in program
     lemmatize = 'lemma' in program
     debug = 'nodebug' not in program
+
+
 
     if online:
         dictionary = HashDictionary(id_range=keep_words, debug=debug)
@@ -89,7 +134,10 @@ if __name__ == '__main__':
         wiki.save(outp + '_corpus.pkl.bz2')
         dictionary.allow_update = False
     else:
-        wiki = WikiCorpus(inp, lemmatize=lemmatize)  # takes about 9h on a macbook pro, for 3.5m articles (june 2011)
+        if lemmatize:
+            wiki = WikiCorpus(inp, lemmatizer_func=my_lemmatize)  # takes about 9h on a macbook pro, for 3.5m articles (june 2011)
+        else:
+            wiki = WikiCorpus(inp)  # takes about 9h on a macbook pro, for 3.5m articles (june 2011)
         # only keep the most frequent words (out of total ~8.2m unique tokens)
         wiki.dictionary.filter_extremes(no_below=20, no_above=0.1, keep_n=DEFAULT_DICT_SIZE)
         # save dictionary and bag-of-words (term-document frequency matrix)
