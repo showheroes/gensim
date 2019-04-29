@@ -136,7 +136,7 @@ if __name__ == '__main__':
         dictionary.allow_update = False
     else:
         if lemmatize:
-            wiki = WikiCorpus(inp, lemmatizer_func=my_lemmatize)  # takes about 9h on a macbook pro, for 3.5m articles (june 2011)
+            wiki = WikiCorpus(inp, lemmatizer_func = my_lemmatize, language = language)  # takes about 9h on a macbook pro, for 3.5m articles (june 2011)
         else:
             wiki = WikiCorpus(inp)  # takes about 9h on a macbook pro, for 3.5m articles (june 2011)
         # only keep the most frequent words (out of total ~8.2m unique tokens)
