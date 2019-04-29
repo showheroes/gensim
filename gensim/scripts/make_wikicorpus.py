@@ -51,14 +51,6 @@ from adhero.core.nlp.utils import Stopwords
 # appear in more than 10% of articles are removed and from the rest, the
 # DEFAULT_DICT_SIZE most frequent types are kept.
 DEFAULT_DICT_SIZE = 100000
-sw_class = Stopwords()
-language_codes = {
-    'german' : 'de',
-    'english' : 'en',
-    'french' : 'fr',
-    'dutch' : 'nl',
-    'russian' : 'ru'
-}
 
 
 def my_lemmatize(content, min_len, max_len, language):
@@ -69,6 +61,15 @@ def my_lemmatize(content, min_len, max_len, language):
     else:
         nlp = spacy.load(f'{lc}_core_news_sm')
 
+    sw_class = Stopwords()
+    language_codes = {
+        'german' : 'de',
+        'english' : 'en',
+        'french' : 'fr',
+        'dutch' : 'nl',
+        'russian' : 'ru'
+    }
+    
     stopwords = sw_class[language]
     # lang_class = spu.get_lang_class(language_codes[language])
     # lang = lang_class()
