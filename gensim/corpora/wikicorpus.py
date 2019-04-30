@@ -494,7 +494,7 @@ def process_article(args, tokenizer_func=tokenize, token_min_len=TOKEN_MIN_LEN,
     """
     text, lemmatize, lemmatizer_func, language, title, pageid = args
     text = filter_wiki(text)
-    if lemmatize and lemmatizer_func:
+    if lemmatize:
         result = lemmatizer_func(text, token_min_len, token_max_len, language)
     else:
         result = tokenizer_func(text, token_min_len, token_max_len, lower)
