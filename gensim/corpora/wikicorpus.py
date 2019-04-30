@@ -336,9 +336,9 @@ def remove_file(s):
         s = s.replace(m, caption, 1)
     return s
 
-def lemmatize(content):
+def lemmatize(content, token_min_len, token_max_len, language):
     if utils.has_pattern():
-        return utils.lemmatize(content)
+        return utils.lemmatize(content, min_length = token_min_len, max_length=token_max_len)
     return utils.tokenize(content, lower=True, errors='ignore')
 
 
@@ -579,9 +579,9 @@ class WikiCorpus(TextCorpus):
         >>> MmCorpus.serialize(corpus_path, wiki)  # another 8h, creates a file in MatrixMarket format and mapping
 
     """
-    def __init__(self, fname, processes=None, lemmatizer_func=None, dictionary=None,
+    def __init__(self, fname, processes=None, lemmatize=utils.has_pattern(), lemmatizer_func=None, dictionary=None,
                  filter_namespaces=('0',), tokenizer_func=tokenize, article_min_tokens=ARTICLE_MIN_WORDS,
-                 token_min_len=TOKEN_MIN_LEN, token_max_len=TOKEN_MAX_LEN, lower=True, filter_articles=None, language='en'):
+                 token_min_len=TOKEN_MIN_LEN, token_max_len=TOKEN_MAX_LEN, lower=True, filter_articles=None, language='english'):
         """Initialize the corpus.
 
         Unless a dictionary is provided, this scans the corpus once,
@@ -630,10 +630,11 @@ class WikiCorpus(TextCorpus):
         if processes is None:
             processes = max(1, multiprocessing.cpu_count() - 1)
         self.processes = processes
-        if lemmatizer_func:
-            self.lemmatizer_func = lemmatizer_func
-        elif utils.has_pattern():
-            self.lemmatizer_func = lemmatize
+        if lemmatize:
+            if lemmatizer_func:
+                self.lemmatizer_func = lemmatizer_func
+            elif utils.has_pattern():
+                self.lemmatizer_func = lemmatize
         self.language = language
         self.tokenizer_func = tokenizer_func
         self.article_min_tokens = article_min_tokens
