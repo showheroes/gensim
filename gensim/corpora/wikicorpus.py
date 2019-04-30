@@ -492,9 +492,9 @@ def process_article(args, tokenizer_func=tokenize, token_min_len=TOKEN_MIN_LEN,
         List of tokens from article, title and page id.
 
     """
-    text, lemmatizer_func, language, title, pageid = args
+    text, lemmatize, lemmatizer_func, language, title, pageid = args
     text = filter_wiki(text)
-    if lemmatizer_func:
+    if lemmatize and lemmatizer_func:
         result = lemmatizer_func(text, token_min_len, token_max_len, language)
     else:
         result = tokenizer_func(text, token_min_len, token_max_len, lower)
@@ -684,7 +684,7 @@ class WikiCorpus(TextCorpus):
 
         tokenization_params = (self.tokenizer_func, self.token_min_len, self.token_max_len, self.lower)
         texts = \
-            ((text, self.lemmatizer_func, self.language, title, pageid, tokenization_params)
+            ((text, self.lemmatize, self.lemmatizer_func, self.language, title, pageid, tokenization_params)
              for title, text, pageid
              in extract_pages(bz2.BZ2File(self.fname), self.filter_namespaces, self.filter_articles))
         pool = multiprocessing.Pool(self.processes, init_to_ignore_interrupt)
