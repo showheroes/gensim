@@ -631,6 +631,7 @@ class WikiCorpus(TextCorpus):
             processes = max(1, multiprocessing.cpu_count() - 1)
         self.processes = processes
         self.lemmatizer_func = None
+        self.lemmatize = lemmatize
         if lemmatize:
             if lemmatizer_func:
                 self.lemmatizer_func = lemmatizer_func
