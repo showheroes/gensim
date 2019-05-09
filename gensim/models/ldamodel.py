@@ -525,7 +525,7 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                 sstats_sample += self.eta + sstats_single_sample
             # MC estimate of suff stats
             sstats_sample /= self.tau
-            expected gradient = sstats_sample - self.state.sstats
+            expected_gradient = sstats_sample - self.state.sstats
             # compute gradient means per topic
             self.moving_gradient_average = np.mean(expected_gradient, axis=1)
             # compute the variance
