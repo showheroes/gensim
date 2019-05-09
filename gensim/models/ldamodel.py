@@ -767,8 +767,8 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             subsample_ratio = self.state.numdocs/gamma.shape[0]
             old_lambda = state.get_lambda()
             new_lambda = subsample_ratio * (state.eta + sstats)
-            (nz_rows, nz_cols) = np.nonzero(new_lambda)
-            gradient = new_lambda[nz_rows,nz_cols] - old_lambda[nz_rows, nz_cols]
+            (_, nz_cols) = np.nonzero(new_lambda)
+            gradient = new_lambda[:,nz_cols] - old_lambda[:, nz_cols]
             exp_gradient = np.mean(gradient, axis=1)
             tau_rec = 1./self.tau
             self.moving_gradient_average *= (1 - tau_rec)
