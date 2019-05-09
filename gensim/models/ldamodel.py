@@ -349,7 +349,7 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                  alpha='symmetric', eta=None, decay=0.5, offset=1.0, eval_every=10,
                  iterations=50, gamma_threshold=0.001, minimum_probability=0.01,
                  random_state=None, ns_conf=None, minimum_phi_value=0.01,
-                 per_word_topics=False, callbacks=None, dtype=np.float32):
+                 per_word_topics=False, callbacks=None, dtype=np.float32, adaptive_learning_rate=False):
         """
 
         Parameters
@@ -455,6 +455,8 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         self.per_word_topics = per_word_topics
         self.callbacks = callbacks
 
+        self.adaptive_learning_rate = adaptive_learning_rate
+
         self.alpha, self.optimize_alpha = self.init_dir_prior(alpha, 'alpha')
 
         assert self.alpha.shape == (self.num_topics,), \
@@ -508,6 +510,27 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         self.state = LdaState(self.eta, (self.num_topics, self.num_terms), dtype=self.dtype)
         self.state.sstats[...] = self.random_state.gamma(100., 1. / 100., (self.num_topics, self.num_terms))
         self.expElogbeta = np.exp(dirichlet_expectation(self.state.sstats))
+
+        if self.adaptive_learning_rate:
+            # construct MC estimate of expectation using 100 samples
+            self.tau = 20
+            self.moving_gradient_average = np.zeros((self.num_topics,))
+            self.moving_gradient_variance = 0.
+            sstats_sample = np.zeros((self.num_topics, self.num_terms))
+            for i in range(self.tau):
+                doc_sample_idx = self.random_state.permutation(len(corpus))[:32]
+                _, sstats_single_sample = self.inference(corpus[doc_sample_idx], collect_sstats=True)
+                # upscale to noisy gradient
+                sstats_sample *= float(len(corpus)/32)
+                sstats_sample += self.eta + sstats_single_sample
+            # MC estimate of suff stats
+            sstats_sample /= self.tau
+            expected gradient = sstats_sample - self.state.sstats
+            # compute gradient means per topic
+            self.moving_gradient_average = np.mean(expected_gradient, axis=1)
+            # compute the variance
+            grad_cov = np.cov(expected_gradient)
+            self.moving_gradient_variance = np.dot(self.expected_gradient, self.expected_gradient) + np.trace(grad_cov)
 
         # Check that we haven't accidentally fallen back to np.float64
         assert self.eta.dtype == self.dtype
@@ -740,6 +763,18 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         if state is None:
             state = self.state
         gamma, sstats = self.inference(chunk, collect_sstats=True)
+        if self.adaptive_learning_rate:
+            subsample_ratio = self.state.numdocs/gamma.shape[0]
+            old_lambda = state.get_lambda()
+            new_lambda = subsample_ratio * (state.eta + sstats)
+            (nz_rows, nz_cols) = np.nonzero(new_lambda)
+            gradient = new_lambda[nz_rows,nz_cols] - old_lambda[nz_rows, nz_cols]
+            exp_gradient = np.mean(gradient, axis=1)
+            tau_rec = 1./self.tau
+            self.moving_gradient_average *= (1 - tau_rec)
+            self.moving_gradient_average += tau_rec * exp_gradient
+            self.moving_gradient_variance *= (1 - tau_rec)
+            self.moving_gradient_variance += tau_rec * np.dot(exp_gradient, exp_gradient)
         state.sstats += sstats
         state.numdocs += gamma.shape[0]  # avoids calling len(chunk) on a generator
         assert gamma.dtype == self.dtype
@@ -939,6 +974,11 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         # pass_ + num_updates handles increasing the starting t for each pass,
         # while allowing it to "reset" on the first pass of each update
         def rho():
+            if self.adaptive_learning_rate:
+                new_lr = np.dot(self.moving_gradient_average, self.moving_gradient_average)/self.moving_gradient_variance
+                self.tau *= (1 - new_lr)
+                self.tau += 1
+                return new_lr
             return pow(offset + pass_ + (self.num_updates / chunksize), -decay)
 
         if self.callbacks:
@@ -953,6 +993,7 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                 logger.info('initializing %s workers', self.numworkers)
                 self.dispatcher.reset(self.state)
             else:
+                # saves the current state in other, always holds the previous state
                 other = LdaState(self.eta, self.state.sstats.shape, self.dtype)
             dirty = False
 
