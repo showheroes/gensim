@@ -530,7 +530,7 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             self.moving_gradient_average = np.mean(expected_gradient, axis=1)
             # compute the variance
             grad_cov = np.cov(expected_gradient)
-            self.moving_gradient_variance = np.dot(self.expected_gradient, self.expected_gradient) + np.trace(grad_cov)
+            self.moving_gradient_variance = np.dot(expected_gradient, expected_gradient) + np.trace(grad_cov)
 
         # Check that we haven't accidentally fallen back to np.float64
         assert self.eta.dtype == self.dtype
