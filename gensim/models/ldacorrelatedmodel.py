@@ -96,6 +96,7 @@ import time
 from collections import defaultdict
 
 import numpy as np
+from scipy.optimize import fmin_l_bfgs_b, minimize
 from scipy.special import gammaln, psi  # gamma function utils
 from scipy.special import polygamma
 
@@ -460,6 +461,14 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         self.minimum_phi_value = minimum_phi_value
         self.per_word_topics = per_word_topics
         self.callbacks = callbacks
+
+        self.mu_kv = np.zeros((self.num_topics, self.num_terms))  # TODO check dimensions
+        self.sigma2_kv = np.ones((self.num_topics, self.num_terms))
+        self.sigma2_inverse_kv = 1 / self.sigma2_kv
+
+        self.lambda_kv = np.zeros((self.num_topics, self.num_terms))
+        self.nu2_kv = np.ones((self.num_topics, self.num_terms))
+        self.optimize_zeta()
 
         self.alpha, self.optimize_alpha = self.init_dir_prior(alpha, 'alpha')
         assert self.alpha.shape == (self.num_topics,), \
@@ -1073,14 +1082,51 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         diff = mean_absolute_difference(previous_Elogbeta.ravel(), current_Elogbeta.ravel())
         logger.info("topic diff=%f, rho=%f", diff, rho)
 
-        if self.optimize_eta:
-            self.update_eta(self.state.get_lambda(), rho)
-
         if not extra_pass:
             # only update if this isn't an additional pass
             self.num_updates += other.numdocs
 
-    def bound(self, corpus, gamma=None, subsample_ratio=1.0):
+    def optimize_zeta(self):
+        self.zeta_k1 = np.sum(np.exp(self.lambda_kv + 0.5 * self.nu2_kv), 1)[:, np.newaxis]
+
+    def optimize_lambda(self, corpus):
+        def f(lambda_kv):
+            self.bound(corpus, lambda_kv)
+
+        def df(lambda_kv):
+            result_kv = np.zeros((self.num_topics, self.num_terms))
+            result_kv -= self.sigma2_inverse_kv * (lambda_kv - self.mu_kv)
+            result_kv += self.state.sstats * (1 - (1/self.zeta_k1) * np.exp(lambda_kv + 0.5 * self.nu2_kv))
+
+            return result_kv
+
+        res = minimize(lambda x: -f(x), self.lambda_kv, method="BFGS", jac=lambda x: -df(x))
+        self.lambda_kv = res.x
+
+    def optimize_nu2(self, corpus):
+        def f(nu2_kv):
+            return self.bound(corpus, nu2_kv=nu2_kv)
+
+        def df(nu2_kv):
+            result_kv = np.zeros((self.num_topics, self.num_terms))
+            result_kv -= 0.5 * self.sigma2_inverse_kv
+            result_kv -= (self.state.sstats / (2 * self.zeta_k1)) * np.exp(self.lambda_kv + 0.5 * nu2_kv)
+            result_kv += 1 / (2 * nu2_kv)  # TODO safe_division
+
+            return result_kv
+
+        constraints = [(0, None) for _ in range(self.num_terms)]
+        result = fmin_l_bfgs_b(lambda x: -f(x), self.nu2_kv, fprime=lambda x: -df(x), bounds=constraints)
+        self.nu2_kv = result[0]
+
+    def compute_Elogbeta(self, lambda_kv, nu2_kv):
+        Elogbeta = np.zeros((self.num_topics, self.num_terms))
+        Elogbeta += lambda_kv - np.log(self.zeta_k1) + 1
+        Elogbeta -= (1/self.zeta_k1) * np.sum(np.exp(lambda_kv + 0.5 * nu2_kv), 1)
+
+        return Elogbeta
+
+    def bound(self, corpus, gamma=None, lambda_kv=None, nu2_kv=None, subsample_ratio=1.0):
         """Estimate the variational bound of documents from the corpus as E_q[log p(corpus)] - E_q[log q(corpus)].
 
         Parameters
@@ -1101,9 +1147,14 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             The variational bound score calculated for each document.
 
         """
+        if lambda_kv is None:
+            lambda_kv = self.lambda_kv
+
+        if nu2_kv is None:
+            nu2_kv = self.nu2_kv
+
         score = 0.0
-        _lambda = self.state.get_lambda()
-        Elogbeta = dirichlet_expectation(_lambda)
+        Elogbeta = self.compute_Elogbeta(lambda_kv, nu2_kv)
 
         for d, doc in enumerate(corpus):  # stream the input doc-by-doc, in case it's too large to fit in RAM
             if d % self.chunksize == 0:
@@ -1129,16 +1180,17 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         # that the likelihood is always roughly on the same scale.
         score *= subsample_ratio
 
-        # E[log p(beta | eta) - log q (beta | lambda)]; assumes eta is a scalar
-        score += np.sum((self.eta - _lambda) * Elogbeta)
-        score += np.sum(gammaln(_lambda) - gammaln(self.eta))
+        # E[log p(beta | mu, Sigma)]
+        Elogpbeta_k = np.zeros(self.num_topics)
+        Elogpbeta_k += 0.5 * np.log(np.prod(self.sigma2_inverse_kv, 1))
+        Elogpbeta_k -= 0.5 * np.sum(nu2_kv * self.sigma2_inverse_kv, 1)
+        Elogpbeta_k -= 0.5 * np.sum((lambda_kv - self.mu_kv) * self.sigma2_inverse_kv * (lambda_kv - self.mu_kv), 1)
 
-        if np.ndim(self.eta) == 0:
-            sum_eta = self.eta * self.num_terms
-        else:
-            sum_eta = np.sum(self.eta)
+        # E[log q(beta | lambda, nu2)]
+        Elogqbeta_k = np.zeros(self.num_topics)
+        Elogqbeta_k += 0.5 * (np.sum(np.log(nu2_kv), 1) + self.num_terms)  # TODO safe_log
 
-        score += np.sum(gammaln(sum_eta) - gammaln(np.sum(_lambda, 1)))
+        score += np.sum(Elogpbeta_k - Elogqbeta_k)
 
         return score
 
