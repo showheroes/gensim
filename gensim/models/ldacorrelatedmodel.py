@@ -1188,7 +1188,7 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
 
         # E[log q(beta | lambda, nu2)]
         Elogqbeta_k = np.zeros(self.num_topics)
-        Elogqbeta_k += 0.5 * (np.sum(np.log(nu2_kv), 1) + self.num_terms)  # TODO safe_log
+        Elogqbeta_k -= 0.5 * (np.sum(np.log(nu2_kv), 1) + self.num_terms)  # TODO safe_log
 
         score += np.sum(Elogpbeta_k - Elogqbeta_k)
 
