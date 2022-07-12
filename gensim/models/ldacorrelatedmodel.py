@@ -639,7 +639,7 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
 
         """
         if current_Elogbeta is None:
-            current_Elogbeta = self.state.get_Elogbeta()
+            current_Elogbeta = self.get_Elogbeta(self.lambda_kv, self.nu2_kv)
         self.expElogbeta = np.exp(current_Elogbeta)
         assert self.expElogbeta.dtype == self.dtype
 
@@ -1017,7 +1017,6 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                         self.update_alpha(gammat, rho())
 
                 dirty = True
-                del chunk
 
                 # perform an M step. determine when based on update_every, don't do this after every chunk
                 if update_every and (chunk_no + 1) % (update_every * self.numworkers) == 0:
@@ -1025,7 +1024,8 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                         # distributed mode: wait for all workers to finish
                         logger.info("reached the end of input; now waiting for all remaining jobs to finish")
                         other = self.dispatcher.getstate()
-                    self.do_mstep(rho(), other, pass_ > 0)
+                    subsample_ratio = len(chunk) / lencorpus
+                    self.do_mstep(chunk, rho(), other, pass_ > 0, subsample_ratio)
                     del other  # frees up memory
 
                     if self.dispatcher:
@@ -1034,6 +1034,8 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                     else:
                         other = LdaState(self.eta, self.state.sstats.shape, self.dtype)
                     dirty = False
+
+                del chunk
 
             if reallen != lencorpus:
                 raise RuntimeError("input corpus size changed during training (don't use generators as input)")
@@ -1050,31 +1052,43 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                     # distributed mode: wait for all workers to finish
                     logger.info("reached the end of input; now waiting for all remaining jobs to finish")
                     other = self.dispatcher.getstate()
-                self.do_mstep(rho(), other, pass_ > 0)
+                self.do_mstep(corpus, rho(), other, pass_ > 0, subsample_ratio=1.0)
                 del other
                 dirty = False
 
-    def do_mstep(self, rho, other, extra_pass=False):
+    def do_mstep(self, corpus, rho, other, extra_pass=False, subsample_ratio=1.0):
         """Maximization step: use linear interpolation between the existing topics and
         collected sufficient statistics in `other` to update the topics.
 
         Parameters
         ----------
+        corpus : iterable of list of (int, float)
+            The corpus chunk on which the mstep will be performed.
         rho : float
             Learning rate.
         other : :class:`~gensim.models.ldamodel.LdaModel`
             The model whose sufficient statistics will be used to update the topics.
         extra_pass : bool, optional
             Whether this step required an additional pass over the corpus.
+        subsample_ratio : float, optional
+            Percentage of the whole corpus represented by the passed `corpus` argument (in case this was a sample).
+            Set to 1.0 if the whole corpus was passed.This is used as a multiplicative factor to scale the likelihood
+            appropriately.
 
         """
         logger.debug("updating topics")
         # update self with the new blend; also keep track of how much did
         # the topics change through this update, to assess convergence
-        previous_Elogbeta = self.state.get_Elogbeta()
+        previous_Elogbeta = self.get_Elogbeta(self.lambda_kv, self.nu2_kv)
         self.state.blend(rho, other)
 
-        current_Elogbeta = self.state.get_Elogbeta()
+        self.optimize_zeta()
+        self.optimize_lambda(corpus, subsample_ratio)
+        self.optimize_zeta()
+        self.optimize_nu2(corpus, subsample_ratio)
+        self.optimize_zeta()
+
+        current_Elogbeta = self.get_Elogbeta(self.lambda_kv, self.nu2_kv)
         self.sync_state(current_Elogbeta)
 
         # print out some debug info at the end of each EM iteration
@@ -1089,9 +1103,9 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
     def optimize_zeta(self):
         self.zeta_k1 = np.sum(np.exp(self.lambda_kv + 0.5 * self.nu2_kv), 1)[:, np.newaxis]
 
-    def optimize_lambda(self, corpus):
+    def optimize_lambda(self, corpus, subsample_ratio=1.0):
         def f(lambda_kv):
-            self.bound(corpus, lambda_kv)
+            self.bound(corpus=corpus, lambda_kv=lambda_kv, subsample_ratio=subsample_ratio)
 
         def df(lambda_kv):
             result_kv = np.zeros((self.num_topics, self.num_terms))
@@ -1103,9 +1117,9 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         res = minimize(lambda x: -f(x), self.lambda_kv, method="BFGS", jac=lambda x: -df(x))
         self.lambda_kv = res.x
 
-    def optimize_nu2(self, corpus):
+    def optimize_nu2(self, corpus, subsample_ratio=1.0):
         def f(nu2_kv):
-            return self.bound(corpus, nu2_kv=nu2_kv)
+            return self.bound(corpus=corpus, nu2_kv=nu2_kv, subsample_ratio=subsample_ratio)
 
         def df(nu2_kv):
             result_kv = np.zeros((self.num_topics, self.num_terms))
@@ -1119,7 +1133,7 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         result = fmin_l_bfgs_b(lambda x: -f(x), self.nu2_kv, fprime=lambda x: -df(x), bounds=constraints)
         self.nu2_kv = result[0]
 
-    def compute_Elogbeta(self, lambda_kv, nu2_kv):
+    def get_Elogbeta(self, lambda_kv, nu2_kv):
         Elogbeta = np.zeros((self.num_topics, self.num_terms))
         Elogbeta += lambda_kv - np.log(self.zeta_k1) + 1
         Elogbeta -= (1/self.zeta_k1) * np.sum(np.exp(lambda_kv + 0.5 * nu2_kv), 1)
