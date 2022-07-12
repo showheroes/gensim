@@ -1096,6 +1096,9 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         diff = mean_absolute_difference(previous_Elogbeta.ravel(), current_Elogbeta.ravel())
         logger.info("topic diff=%f, rho=%f", diff, rho)
 
+        if self.optimize_eta:
+            self.update_eta(self.state.get_lambda(), rho)
+
         if not extra_pass:
             # only update if this isn't an additional pass
             self.num_updates += other.numdocs
