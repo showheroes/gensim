@@ -466,9 +466,9 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         self.sigma2_kv = np.ones((self.num_topics, self.num_terms))
         self.sigma2_inverse_kv = 1 / self.sigma2_kv
 
-        self.lambda_kv = np.zeros((self.num_topics, self.num_terms))
+        self.lambda_kv = np.random.uniform(size=(self.num_topics, self.num_terms))
         self.nu2_kv = np.ones((self.num_topics, self.num_terms))
-        self.optimize_zeta()
+        self.zeta_k = np.sum(np.exp(self.lambda_kv + 0.5 * self.nu2_kv), 1)
 
         self.alpha, self.optimize_alpha = self.init_dir_prior(alpha, 'alpha')
         assert self.alpha.shape == (self.num_topics,), \
@@ -515,8 +515,9 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
 
         # Initialize the variational distribution q(beta|lambda)
         self.state = LdaState(self.eta, (self.num_topics, self.num_terms), dtype=self.dtype)
-        self.state.sstats[...] = self.random_state.gamma(100., 1. / 100., (self.num_topics, self.num_terms))
-        self.expElogbeta = np.exp(dirichlet_expectation(self.state.sstats))
+        self.state.sstats[...] = self.random_state.gamma(100., 1. / 100., (self.num_topics, self.num_terms))  # TODO change
+        current_Elogbeta = self.get_Elogbeta(self.lambda_kv, self.nu2_kv)
+        self.expElogbeta = np.exp(current_Elogbeta)
 
         # Check that we haven't accidentally fallen back to np.float64
         assert self.eta.dtype == self.dtype
@@ -1017,6 +1018,7 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                         self.update_alpha(gammat, rho())
 
                 dirty = True
+                del chunk
 
                 # perform an M step. determine when based on update_every, don't do this after every chunk
                 if update_every and (chunk_no + 1) % (update_every * self.numworkers) == 0:
@@ -1024,8 +1026,7 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                         # distributed mode: wait for all workers to finish
                         logger.info("reached the end of input; now waiting for all remaining jobs to finish")
                         other = self.dispatcher.getstate()
-                    subsample_ratio = len(chunk) / lencorpus
-                    self.do_mstep(chunk, rho(), other, pass_ > 0, subsample_ratio)
+                    self.do_mstep(rho(), other, pass_ > 0)
                     del other  # frees up memory
 
                     if self.dispatcher:
@@ -1034,8 +1035,6 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                     else:
                         other = LdaState(self.eta, self.state.sstats.shape, self.dtype)
                     dirty = False
-
-                del chunk
 
             if reallen != lencorpus:
                 raise RuntimeError("input corpus size changed during training (don't use generators as input)")
@@ -1052,28 +1051,22 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                     # distributed mode: wait for all workers to finish
                     logger.info("reached the end of input; now waiting for all remaining jobs to finish")
                     other = self.dispatcher.getstate()
-                self.do_mstep(corpus, rho(), other, pass_ > 0, subsample_ratio=1.0)
+                self.do_mstep(rho(), other, pass_ > 0)
                 del other
                 dirty = False
 
-    def do_mstep(self, corpus, rho, other, extra_pass=False, subsample_ratio=1.0):
+    def do_mstep(self, rho, other, extra_pass=False):
         """Maximization step: use linear interpolation between the existing topics and
         collected sufficient statistics in `other` to update the topics.
 
         Parameters
         ----------
-        corpus : iterable of list of (int, float)
-            The corpus chunk on which the mstep will be performed.
         rho : float
             Learning rate.
         other : :class:`~gensim.models.ldamodel.LdaModel`
             The model whose sufficient statistics will be used to update the topics.
         extra_pass : bool, optional
             Whether this step required an additional pass over the corpus.
-        subsample_ratio : float, optional
-            Percentage of the whole corpus represented by the passed `corpus` argument (in case this was a sample).
-            Set to 1.0 if the whole corpus was passed.This is used as a multiplicative factor to scale the likelihood
-            appropriately.
 
         """
         logger.debug("updating topics")
@@ -1082,11 +1075,12 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         previous_Elogbeta = self.get_Elogbeta(self.lambda_kv, self.nu2_kv)
         self.state.blend(rho, other)
 
-        self.optimize_zeta()
-        self.optimize_lambda(corpus, subsample_ratio)
-        self.optimize_zeta()
-        self.optimize_nu2(corpus, subsample_ratio)
-        self.optimize_zeta()
+        for k in range(self.num_topics):
+            self.optimize_zeta_for_topic(k)
+            self.optimize_lambda_for_topic(k)
+            self.optimize_zeta_for_topic(k)
+            self.optimize_nu2_for_topic(k)
+            self.optimize_zeta_for_topic(k)
 
         current_Elogbeta = self.get_Elogbeta(self.lambda_kv, self.nu2_kv)
         self.sync_state(current_Elogbeta)
@@ -1103,43 +1097,55 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             # only update if this isn't an additional pass
             self.num_updates += other.numdocs
 
-    def optimize_zeta(self):
-        self.zeta_k1 = np.sum(np.exp(self.lambda_kv + 0.5 * self.nu2_kv), 1)[:, np.newaxis]
+    def optimize_zeta_for_topic(self, k):
+        self.zeta_k[k] = np.sum(np.exp(self.lambda_kv[k] + 0.5 * self.nu2_kv[k]))
 
-    def optimize_lambda(self, corpus, subsample_ratio=1.0):
-        def f(lambda_kv):
-            self.bound(corpus=corpus, lambda_kv=lambda_kv, subsample_ratio=subsample_ratio)
+    def optimize_lambda_for_topic(self, k):
+        def f(lambda_v, k):
+            result = 0.0
+            result -= 0.5 * np.sum((lambda_v - self.mu_kv[k]) * self.sigma2_inverse_kv[k] * (lambda_v - self.mu_kv[k]))
+            result += np.sum(self.state.sstats[k] * (lambda_v - (1/self.zeta_k[k]) * np.exp(lambda_v + 0.5 * self.nu2_kv[k])))
 
-        def df(lambda_kv):
-            result_kv = np.zeros((self.num_topics, self.num_terms))
-            result_kv -= self.sigma2_inverse_kv * (lambda_kv - self.mu_kv)
-            result_kv += self.state.sstats * (1 - (1/self.zeta_k1) * np.exp(lambda_kv + 0.5 * self.nu2_kv))
+            return -result
 
-            return result_kv
+        def df(lambda_v, k):
+            result_v = np.zeros(self.num_terms)
+            result_v -= self.sigma2_inverse_kv[k] * (lambda_v - self.mu_kv[k])
+            result_v += self.state.sstats[k] * (1 - (1/self.zeta_k[k]) * np.exp(lambda_v + 0.5 * self.nu2_kv[k]))
 
-        res = minimize(lambda x: -f(x), self.lambda_kv, method="BFGS", jac=lambda x: -df(x))
-        self.lambda_kv = res.x
+            return -result_v
 
-    def optimize_nu2(self, corpus, subsample_ratio=1.0):
-        def f(nu2_kv):
-            return self.bound(corpus=corpus, nu2_kv=nu2_kv, subsample_ratio=subsample_ratio)
+        res = minimize(f, self.lambda_kv[k], args=(k,), method="BFGS", jac=df)
+        assert res.success == True
+        self.lambda_kv[k] = res.x
 
-        def df(nu2_kv):
-            result_kv = np.zeros((self.num_topics, self.num_terms))
-            result_kv -= 0.5 * self.sigma2_inverse_kv
-            result_kv -= (self.state.sstats / (2 * self.zeta_k1)) * np.exp(self.lambda_kv + 0.5 * nu2_kv)
-            result_kv += 1 / (2 * nu2_kv)  # TODO safe_division
+    def optimize_nu2_for_topic(self, k):
+        def f(nu2_v, k):
+            result = 0.0
+            result -= 0.5 * np.sum(nu2_v * self.sigma2_inverse_kv)
+            result -= np.sum(self.state.sstats[k] * (1/self.zeta_k[k]) * np.sum(np.exp(self.lambda_kv[k] + 0.5 * nu2_v)))
+            result += 0.5 * np.sum(np.log(nu2_v) + np.log(2 * np.pi) + 1)  # TODO safe_log
 
-            return result_kv
+            return -result
+
+        def df(nu2_v, k):
+            result_v = np.zeros(self.num_terms)
+            result_v -= 0.5 * self.sigma2_inverse_kv[k]
+            result_v -= (self.state.sstats[k] / (2 * self.zeta_k[k])) * np.exp(self.lambda_kv[k] + 0.5 * nu2_v)
+            result_v += 1 / (2 * nu2_v)  # TODO safe_division
+
+            return -result_v
 
         constraints = [(0, None) for _ in range(self.num_terms)]
-        result = fmin_l_bfgs_b(lambda x: -f(x), self.nu2_kv, fprime=lambda x: -df(x), bounds=constraints)
-        self.nu2_kv = result[0]
+        res = fmin_l_bfgs_b(f, self.nu2_kv[k], args=(k,), fprime=df, bounds=constraints)
+        assert res[2]["warnflag"] == 0
+        self.nu2_kv[k] = res[0]
 
     def get_Elogbeta(self, lambda_kv, nu2_kv):
-        Elogbeta = np.zeros((self.num_topics, self.num_terms))
-        Elogbeta += lambda_kv - np.log(self.zeta_k1) + 1
-        Elogbeta -= (1/self.zeta_k1) * np.sum(np.exp(lambda_kv + 0.5 * nu2_kv), 1)
+        zeta_k1 = self.zeta_k[:, np.newaxis]
+        Elogbeta = np.zeros((self.num_topics, self.num_terms), dtype=self.dtype)
+        Elogbeta += lambda_kv - np.log(zeta_k1) + 1
+        Elogbeta -= (1/zeta_k1) * np.sum(np.exp(lambda_kv + 0.5 * nu2_kv), 1, keepdims=True)
 
         return Elogbeta
 
@@ -1171,7 +1177,7 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             nu2_kv = self.nu2_kv
 
         score = 0.0
-        Elogbeta = self.compute_Elogbeta(lambda_kv, nu2_kv)
+        Elogbeta = self.get_Elogbeta(lambda_kv, nu2_kv)
 
         for d, doc in enumerate(corpus):  # stream the input doc-by-doc, in case it's too large to fit in RAM
             if d % self.chunksize == 0:
