@@ -1122,8 +1122,8 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
     def optimize_nu2_for_topic(self, k):
         def f(nu2_v, k):
             result = 0.0
-            result -= 0.5 * np.sum(nu2_v * self.sigma2_inverse_kv)
-            result -= np.sum(self.state.sstats[k] * (1/self.zeta_k[k]) * np.sum(np.exp(self.lambda_kv[k] + 0.5 * nu2_v)))
+            result -= 0.5 * np.sum(nu2_v * self.sigma2_inverse_kv[k])
+            result -= np.sum(self.state.sstats[k] * (1/self.zeta_k[k]) * np.exp(self.lambda_kv[k] + 0.5 * nu2_v))
             result += 0.5 * np.sum(np.log(nu2_v) + np.log(2 * np.pi) + 1)  # TODO safe_log
 
             return -result
