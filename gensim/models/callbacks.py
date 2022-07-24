@@ -606,7 +606,7 @@ class Callback(object):
         self.metrics = metrics
 
     def set_model(self, model):
-        """Save the model instance and initialize any required variables which would be updated throughout training.
+        """Save the model instance.
 
         Parameters
         ----------
