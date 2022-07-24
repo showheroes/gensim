@@ -996,7 +996,7 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             callback_on_train_end = CallbackOnTrainEnd(self.callbacks_on_train_end)
             callback_on_train_end.set_model(self)
             # initialize metrics list to store metric values at the end of the training process
-            self.metrics_on_train_end = defaultdict(list)
+            self.metrics_on_train_end = {}
 
         for pass_ in range(passes):
             if self.dispatcher:
@@ -1071,11 +1071,11 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                 del other
                 dirty = False
 
-        # append metric values at the end of the training process
+        # store metric values at the end of the training process
         if self.callbacks_on_train_end:
             current_metrics = callback_on_train_end.on_train_end()
             for metric, value in current_metrics.items():
-                self.metrics_on_train_end[metric].append(value)
+                self.metrics_on_train_end[metric] = value
 
     def do_mstep(self, rho, other, extra_pass=False):
         """Maximization step: use linear interpolation between the existing topics and
