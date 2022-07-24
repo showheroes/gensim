@@ -457,6 +457,7 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         self.per_word_topics = per_word_topics
         self.callbacks = callbacks
         self.callbacks_on_train_end = callbacks_on_train_end
+        self.metrics_on_train_end = {}
 
         self.adaptive_learning_rate = adaptive_learning_rate
 
@@ -995,8 +996,6 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             # pass the list of input callbacks to CallbackOnTrainEnd class
             callback_on_train_end = CallbackOnTrainEnd(self.callbacks_on_train_end)
             callback_on_train_end.set_model(self)
-            # initialize metrics list to store metric values at the end of the training process
-            self.metrics_on_train_end = {}
 
         for pass_ in range(passes):
             if self.dispatcher:
