@@ -101,7 +101,7 @@ from gensim.matutils import (
     dirichlet_expectation, logsumexp, mean_absolute_difference
 )
 from gensim.models import basemodel, CoherenceModel
-from gensim.models.callbacks import Callback
+from gensim.models.callbacks import Callback, CallbackOnTrainEnd
 
 
 logger = logging.getLogger(__name__)
@@ -349,7 +349,7 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                  alpha='symmetric', eta=None, decay=0.5, offset=1.0, eval_every=10,
                  iterations=50, gamma_threshold=0.001, minimum_probability=0.01,
                  random_state=None, ns_conf=None, minimum_phi_value=0.01,
-                 per_word_topics=False, callbacks=None, dtype=np.float32, adaptive_learning_rate=False):
+                 per_word_topics=False, callbacks=None, callbacks_on_train_end=None, dtype=np.float32, adaptive_learning_rate=False):
         """
 
         Parameters
@@ -415,6 +415,8 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             each word, along with their phi values multiplied by the feature length (i.e. word count).
         callbacks : list of :class:`~gensim.models.callbacks.Callback`
             Metric callbacks to log and visualize evaluation metrics of the model during training.
+        callbacks_on_train_end : list of :class:`~gensim.models.callbacks.CallbackOnTrainEnd`
+            Metric callbacks at the end of the training process.
         dtype : {numpy.float16, numpy.float32, numpy.float64}, optional
             Data-type to use during calculations inside model. All inputs are also converted.
 
@@ -454,6 +456,7 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         self.minimum_phi_value = minimum_phi_value
         self.per_word_topics = per_word_topics
         self.callbacks = callbacks
+        self.callbacks_on_train_end = callbacks_on_train_end
 
         self.adaptive_learning_rate = adaptive_learning_rate
 
@@ -988,6 +991,13 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             # initialize metrics list to store metric values after every epoch
             self.metrics = defaultdict(list)
 
+        if self.callbacks_on_train_end:
+            # pass the list of input callbacks to CallbackOnTrainEnd class
+            callback_on_train_end = CallbackOnTrainEnd(self.callbacks_on_train_end)
+            callback_on_train_end.set_model(self)
+            # initialize metrics list to store metric values at the end of the training process
+            self.metrics_on_train_end = defaultdict(list)
+
         for pass_ in range(passes):
             if self.dispatcher:
                 logger.info('initializing %s workers', self.numworkers)
@@ -1060,6 +1070,12 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                 self.do_mstep(rho(), other, pass_ > 0)
                 del other
                 dirty = False
+
+        # append metric values at the end of the training process
+        if self.callbacks_on_train_end:
+            current_metrics = callback_on_train_end.on_train_end()
+            for metric, value in current_metrics.items():
+                self.metrics_on_train_end[metric].append(value)
 
     def do_mstep(self, rho, other, extra_pass=False):
         """Maximization step: use linear interpolation between the existing topics and
