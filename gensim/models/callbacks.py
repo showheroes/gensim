@@ -178,7 +178,8 @@ class CoherenceMetric(Metric):
 
     """
     def __init__(self, corpus=None, texts=None, dictionary=None, coherence=None,
-                 window_size=None, topn=10, logger=None, viz_env=None, title=None):
+                 window_size=None, topn=10, logger=None, viz_env=None, title=None,
+                 visdom_server=None, visdom_port=None, visdom_base_url=None):
         """
 
         Parameters
@@ -210,9 +211,15 @@ class CoherenceMetric(Metric):
            the active shell, while 'visdom' will visualize the coherence value with increasing epochs using the Visdom
            visualization framework.
         viz_env : object, optional
-            Visdom environment to use for plotting the graph. Unused.
+            Visdom environment to use for plotting the graph.
         title : str, optional
             Title of the graph plot in case `logger == 'visdom'`. Unused.
+        visdom_server: str, optional
+            The hostname of visdom server.
+        visdom_port: str, optional
+            The port for visdom server.
+        visdom_base_url: str, optional
+            The base visdom server url.
 
         """
         self.corpus = corpus
@@ -224,6 +231,9 @@ class CoherenceMetric(Metric):
         self.logger = logger
         self.viz_env = viz_env
         self.title = title
+        self.visdom_server = visdom_server
+        self.visdom_port = visdom_port
+        self.visdom_base_url = visdom_base_url
 
     def get_value(self, **kwargs):
         """Get the coherence score.
@@ -261,7 +271,8 @@ class CoherenceMetric(Metric):
 
 class PerplexityMetric(Metric):
     """Metric class for perplexity evaluation."""
-    def __init__(self, corpus=None, logger=None, viz_env=None, title=None):
+    def __init__(self, corpus=None, logger=None, viz_env=None, title=None,
+                 visdom_server=None, visdom_port=None, visdom_base_url=None):
         """
 
         Parameters
@@ -273,15 +284,24 @@ class PerplexityMetric(Metric):
            the active shell, while 'visdom' will visualize the coherence value with increasing epochs using the Visdom
            visualization framework.
         viz_env : object, optional
-            Visdom environment to use for plotting the graph. Unused.
+            Visdom environment to use for plotting the graph.
         title : str, optional
             Title of the graph plot in case `logger == 'visdom'`. Unused.
+        visdom_server: str, optional
+            The hostname of visdom server.
+        visdom_port: str, optional
+            The port for visdom server.
+        visdom_base_url: str, optional
+            The base visdom server url.
 
         """
         self.corpus = corpus
         self.logger = logger
         self.viz_env = viz_env
         self.title = title
+        self.visdom_server = visdom_server
+        self.visdom_port = visdom_port
+        self.visdom_base_url = visdom_base_url
 
     def get_value(self, **kwargs):
         """Get the coherence score.
@@ -310,7 +330,8 @@ class PerplexityMetric(Metric):
 class DiffMetric(Metric):
     """Metric class for topic difference evaluation."""
     def __init__(self, distance="jaccard", num_words=100, n_ann_terms=10, diagonal=True,
-                 annotation=False, normed=True, logger=None, viz_env=None, title=None):
+                 annotation=False, normed=True, logger=None, viz_env=None, title=None,
+                 visdom_server=None, visdom_port=None, visdom_base_url=None):
         """
 
         Parameters
@@ -332,9 +353,15 @@ class DiffMetric(Metric):
            the active shell, while 'visdom' will visualize the coherence value with increasing epochs using the Visdom
            visualization framework.
         viz_env : object, optional
-            Visdom environment to use for plotting the graph. Unused.
+            Visdom environment to use for plotting the graph.
         title : str, optional
             Title of the graph plot in case `logger == 'visdom'`. Unused.
+        visdom_server: str, optional
+            The hostname of visdom server.
+        visdom_port: str, optional
+            The port for visdom server.
+        visdom_base_url: str, optional
+            The base visdom server url.
 
         """
         self.distance = distance
@@ -346,6 +373,9 @@ class DiffMetric(Metric):
         self.logger = logger
         self.viz_env = viz_env
         self.title = title
+        self.visdom_server = visdom_server
+        self.visdom_port = visdom_port
+        self.visdom_base_url = visdom_base_url
 
     def get_value(self, **kwargs):
         """Get the difference between each pair of topics in two topic models.
@@ -377,7 +407,8 @@ class DiffMetric(Metric):
 class ConvergenceMetric(Metric):
     """Metric class for convergence evaluation. """
     def __init__(self, distance="jaccard", num_words=100, n_ann_terms=10, diagonal=True,
-                 annotation=False, normed=True, logger=None, viz_env=None, title=None):
+                 annotation=False, normed=True, logger=None, viz_env=None, title=None,
+                 visdom_server=None, visdom_port=None, visdom_base_url=None):
         """
 
         Parameters
@@ -399,9 +430,15 @@ class ConvergenceMetric(Metric):
            the active shell, while 'visdom' will visualize the coherence value with increasing epochs using the Visdom
            visualization framework.
         viz_env : object, optional
-            Visdom environment to use for plotting the graph. Unused.
+            Visdom environment to use for plotting the graph.
         title : str, optional
             Title of the graph plot in case `logger == 'visdom'`. Unused.
+        visdom_server: str, optional
+            The hostname of visdom server.
+        visdom_port: str, optional
+            The port for visdom server.
+        visdom_base_url: str, optional
+            The base visdom server url.
 
        """
         self.distance = distance
@@ -413,6 +450,9 @@ class ConvergenceMetric(Metric):
         self.logger = logger
         self.viz_env = viz_env
         self.title = title
+        self.visdom_server = visdom_server
+        self.visdom_port = visdom_port
+        self.visdom_base_url = visdom_base_url
 
     def get_value(self, **kwargs):
         """Get the sum of each element in the difference matrix between each pair of topics in two topic models.
@@ -481,10 +521,17 @@ class Callback(object):
             self.previous = copy.deepcopy(model)
             # store diff diagonals of previous epochs
             self.diff_mat = Queue()
-        if any(metric.logger == "visdom" for metric in self.metrics):
+        metrics_with_visdom = [metric for metric in self.metrics if metric.logger == "visdom"]
+        if any(metrics_with_visdom):
             if not VISDOM_INSTALLED:
                 raise ImportError("Please install Visdom for visualization")
-            self.viz = Visdom()
+            # lets assume that all metrics have same visdom arguments
+            self.viz = Visdom(
+                server=metrics_with_visdom[0].visdom_server,
+                port=metrics_with_visdom[0].visdom_port,
+                base_url=metrics_with_visdom[0].visdom_base_url,
+                env=metrics_with_visdom[0].viz_env,
+            )
             # store initial plot windows of every metric (same window will be updated with increasing epochs)
             self.windows = []
         if any(metric.logger == "shell" for metric in self.metrics):
