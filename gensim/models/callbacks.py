@@ -216,7 +216,7 @@ class CoherenceMetric(Metric):
             Title of the graph plot in case `logger == 'visdom'`. Unused.
         visdom_server: str
             The hostname of visdom server.
-        visdom_port: Union[str, int]
+        visdom_port: int
             The port for visdom server.
         visdom_base_url: str
             The base visdom server url.
@@ -316,7 +316,7 @@ class CoherencePerTopicMetric(Metric):
             Title of the graph plot in case `logger == 'visdom'`. Unused.
         visdom_server: str
             The hostname of visdom server.
-        visdom_port: Union[str, int]
+        visdom_port: int
             The port for visdom server.
         visdom_base_url: str
             The base visdom server url.
@@ -389,7 +389,7 @@ class PerplexityMetric(Metric):
             Title of the graph plot in case `logger == 'visdom'`. Unused.
         visdom_server: str
             The hostname of visdom server.
-        visdom_port: Union[str, int]
+        visdom_port: int
             The port for visdom server.
         visdom_base_url: str
             The base visdom server url.
@@ -458,7 +458,7 @@ class DiffMetric(Metric):
             Title of the graph plot in case `logger == 'visdom'`. Unused.
         visdom_server: str
             The hostname of visdom server.
-        visdom_port: Union[str, int]
+        visdom_port: int
             The port for visdom server.
         visdom_base_url: str
             The base visdom server url.
@@ -535,7 +535,7 @@ class ConvergenceMetric(Metric):
             Title of the graph plot in case `logger == 'visdom'`. Unused.
         visdom_server: str
             The hostname of visdom server.
-        visdom_port: Union[str, int]
+        visdom_port: int
             The port for visdom server.
         visdom_base_url: str
             The base visdom server url.
