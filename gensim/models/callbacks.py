@@ -178,8 +178,8 @@ class CoherenceMetric(Metric):
 
     """
     def __init__(self, corpus=None, texts=None, dictionary=None, coherence=None,
-                 window_size=None, topn=10, logger=None, viz_env=None, title=None,
-                 visdom_server=None, visdom_port=None, visdom_base_url=None):
+                 window_size=None, topn=10, logger=None, viz_env="main", title=None,
+                 visdom_server="http://localhost", visdom_port=8097, visdom_base_url="/"):
         """
 
         Parameters
@@ -210,15 +210,15 @@ class CoherenceMetric(Metric):
            Monitor training process using one of the available methods. 'shell' will print the coherence value in
            the active shell, while 'visdom' will visualize the coherence value with increasing epochs using the Visdom
            visualization framework.
-        viz_env : object, optional
+        viz_env : str
             Visdom environment to use for plotting the graph.
         title : str, optional
             Title of the graph plot in case `logger == 'visdom'`. Unused.
-        visdom_server: str, optional
+        visdom_server: str
             The hostname of visdom server.
-        visdom_port: str, optional
+        visdom_port: Union[str, int]
             The port for visdom server.
-        visdom_base_url: str, optional
+        visdom_base_url: str
             The base visdom server url.
 
         """
@@ -278,8 +278,8 @@ class CoherencePerTopicMetric(Metric):
 
     """
     def __init__(self, corpus=None, texts=None, dictionary=None, coherence=None,
-                 window_size=None, topn=10, logger=None, viz_env=None, title=None,
-                 visdom_server=None, visdom_port=None, visdom_base_url=None):
+                 window_size=None, topn=10, logger=None, viz_env="main", title=None,
+                 visdom_server="http://localhost", visdom_port=8097, visdom_base_url="/"):
         """
 
         Parameters
@@ -310,15 +310,15 @@ class CoherencePerTopicMetric(Metric):
            Monitor training process using one of the available methods. 'shell' will print the coherence value in
            the active shell, while 'visdom' will visualize the coherence value with increasing epochs using the Visdom
            visualization framework.
-        viz_env : object, optional
+        viz_env : str
             Visdom environment to use for plotting the graph.
         title : str, optional
             Title of the graph plot in case `logger == 'visdom'`. Unused.
-        visdom_server: str, optional
+        visdom_server: str
             The hostname of visdom server.
-        visdom_port: str, optional
+        visdom_port: Union[str, int]
             The port for visdom server.
-        visdom_base_url: str, optional
+        visdom_base_url: str
             The base visdom server url.
 
         """
@@ -371,8 +371,8 @@ class CoherencePerTopicMetric(Metric):
 
 class PerplexityMetric(Metric):
     """Metric class for perplexity evaluation."""
-    def __init__(self, corpus=None, logger=None, viz_env=None, title=None,
-                 visdom_server=None, visdom_port=None, visdom_base_url=None):
+    def __init__(self, corpus=None, logger=None, viz_env="main", title=None,
+                 visdom_server="http://localhost", visdom_port=8097, visdom_base_url="/"):
         """
 
         Parameters
@@ -383,15 +383,15 @@ class PerplexityMetric(Metric):
            Monitor training process using one of the available methods. 'shell' will print the perplexity value in
            the active shell, while 'visdom' will visualize the coherence value with increasing epochs using the Visdom
            visualization framework.
-        viz_env : object, optional
+        viz_env : str
             Visdom environment to use for plotting the graph.
         title : str, optional
             Title of the graph plot in case `logger == 'visdom'`. Unused.
-        visdom_server: str, optional
+        visdom_server: str
             The hostname of visdom server.
-        visdom_port: str, optional
+        visdom_port: Union[str, int]
             The port for visdom server.
-        visdom_base_url: str, optional
+        visdom_base_url: str
             The base visdom server url.
 
         """
@@ -430,8 +430,8 @@ class PerplexityMetric(Metric):
 class DiffMetric(Metric):
     """Metric class for topic difference evaluation."""
     def __init__(self, distance="jaccard", num_words=100, n_ann_terms=10, diagonal=True,
-                 annotation=False, normed=True, logger=None, viz_env=None, title=None,
-                 visdom_server=None, visdom_port=None, visdom_base_url=None):
+                 annotation=False, normed=True, logger=None, viz_env="main", title=None,
+                 visdom_server="http://localhost", visdom_port=8097, visdom_base_url="/"):
         """
 
         Parameters
@@ -452,15 +452,15 @@ class DiffMetric(Metric):
            Monitor training process using one of the available methods. 'shell' will print the coherence value in
            the active shell, while 'visdom' will visualize the coherence value with increasing epochs using the Visdom
            visualization framework.
-        viz_env : object, optional
+        viz_env : str
             Visdom environment to use for plotting the graph.
         title : str, optional
             Title of the graph plot in case `logger == 'visdom'`. Unused.
-        visdom_server: str, optional
+        visdom_server: str
             The hostname of visdom server.
-        visdom_port: str, optional
+        visdom_port: Union[str, int]
             The port for visdom server.
-        visdom_base_url: str, optional
+        visdom_base_url: str
             The base visdom server url.
 
         """
@@ -507,8 +507,8 @@ class DiffMetric(Metric):
 class ConvergenceMetric(Metric):
     """Metric class for convergence evaluation. """
     def __init__(self, distance="jaccard", num_words=100, n_ann_terms=10, diagonal=True,
-                 annotation=False, normed=True, logger=None, viz_env=None, title=None,
-                 visdom_server=None, visdom_port=None, visdom_base_url=None):
+                 annotation=False, normed=True, logger=None, viz_env="main", title=None,
+                 visdom_server="http://localhost", visdom_port=8097, visdom_base_url="/"):
         """
 
         Parameters
@@ -529,15 +529,15 @@ class ConvergenceMetric(Metric):
            Monitor training process using one of the available methods. 'shell' will print the coherence value in
            the active shell, while 'visdom' will visualize the coherence value with increasing epochs using the Visdom
            visualization framework.
-        viz_env : object, optional
+        viz_env : str
             Visdom environment to use for plotting the graph.
         title : str, optional
             Title of the graph plot in case `logger == 'visdom'`. Unused.
-        visdom_server: str, optional
+        visdom_server: str
             The hostname of visdom server.
-        visdom_port: str, optional
+        visdom_port: Union[str, int]
             The port for visdom server.
-        visdom_base_url: str, optional
+        visdom_base_url: str
             The base visdom server url.
 
        """
