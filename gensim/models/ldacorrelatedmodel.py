@@ -1,13 +1,15 @@
 import logging
 
 import numpy as np
+import six
 from scipy.optimize import fmin_l_bfgs_b, minimize
 from scipy.special import gammaln
 
+from gensim import utils
 from gensim.matutils import (
     dirichlet_expectation, logsumexp, mean_absolute_difference,
 )
-from gensim.models.ldamodel import LdaModel
+from gensim.models.ldamodel import LdaModel, LdaState
 
 
 logger = logging.getLogger(__name__)
@@ -85,14 +87,44 @@ class LdaCorrelatedModel(LdaModel):
 
         """
         eta = None
-        super().__init__(
-            corpus=corpus, num_topics=num_topics, id2word=id2word,
-            distributed=distributed, chunksize=chunksize, passes=passes, update_every=update_every,
-            alpha=alpha, eta=eta, decay=decay, offset=offset, eval_every=eval_every,
-            iterations=iterations, gamma_threshold=gamma_threshold, minimum_probability=minimum_probability,
-            random_state=random_state, ns_conf=ns_conf, minimum_phi_value=minimum_phi_value,
-            per_word_topics=per_word_topics, callbacks=callbacks, dtype=dtype, adaptive_learning_rate=adaptive_learning_rate,
-        )
+
+        self.dtype = np.finfo(dtype).dtype
+
+        # store user-supplied parameters
+        self.id2word = id2word
+        if corpus is None and self.id2word is None:
+            raise ValueError(
+                'at least one of corpus/id2word must be specified, to establish input space dimensionality'
+            )
+
+        if self.id2word is None:
+            logger.warning("no word id mapping provided; initializing from corpus, assuming identity")
+            self.id2word = utils.dict_from_corpus(corpus)
+            self.num_terms = len(self.id2word)
+        elif len(self.id2word) > 0:
+            self.num_terms = 1 + max(self.id2word.keys())
+        else:
+            self.num_terms = 0
+
+        if self.num_terms == 0:
+            raise ValueError("cannot compute LDA over an empty collection (no terms)")
+
+        self.distributed = bool(distributed)
+        self.num_topics = int(num_topics)
+        self.chunksize = chunksize
+        self.decay = decay
+        self.offset = offset
+        self.minimum_probability = minimum_probability
+        self.num_updates = 0
+
+        self.passes = passes
+        self.update_every = update_every
+        self.eval_every = eval_every
+        self.minimum_phi_value = minimum_phi_value
+        self.per_word_topics = per_word_topics
+        self.callbacks = callbacks
+
+        self.adaptive_learning_rate = adaptive_learning_rate
 
         self.mu_kv = np.zeros((self.num_topics, self.num_terms))
         self.sigma2_kv = np.ones((self.num_topics, self.num_terms))
@@ -102,7 +134,66 @@ class LdaCorrelatedModel(LdaModel):
         self.nu2_kv = np.ones((self.num_topics, self.num_terms))
         self.zeta_k = np.sum(np.exp(self.lambda_kv + 0.5 * self.nu2_kv), 1)
 
+        self.alpha, self.optimize_alpha = self.init_dir_prior(alpha, 'alpha')
+        assert self.alpha.shape == (self.num_topics,), \
+            "Invalid alpha shape. Got shape %s, but expected (%d, )" % (str(self.alpha.shape), self.num_topics)
+
+        if isinstance(eta, six.string_types):
+            if eta == 'asymmetric':
+                raise ValueError("The 'asymmetric' option cannot be used for eta")
+
+        self.eta, self.optimize_eta = self.init_dir_prior(eta, 'eta')
+        assert self.eta.shape == (self.num_terms,) or self.eta.shape == (self.num_topics, self.num_terms), (
+            "Invalid eta shape. Got shape %s, but expected (%d, 1) or (%d, %d)" %
+            (str(self.eta.shape), self.num_terms, self.num_topics, self.num_terms))
+
+        self.random_state = utils.get_random_state(random_state)
+
+        # VB constants
+        self.iterations = iterations
+        self.gamma_threshold = gamma_threshold
+
+        # set up distributed environment if necessary
+        if not distributed:
+            logger.info("using serial LDA version on this node")
+            self.dispatcher = None
+            self.numworkers = 1
+        else:
+            if self.optimize_alpha:
+                raise NotImplementedError("auto-optimizing alpha not implemented in distributed LDA")
+            # set up distributed version
+            try:
+                import Pyro4
+                if ns_conf is None:
+                    ns_conf = {}
+
+                with utils.getNS(**ns_conf) as ns:
+                    from gensim.models.lda_dispatcher import LDA_DISPATCHER_PREFIX
+                    self.dispatcher = Pyro4.Proxy(ns.list(prefix=LDA_DISPATCHER_PREFIX)[LDA_DISPATCHER_PREFIX])
+                    logger.debug("looking for dispatcher at %s" % str(self.dispatcher._pyroUri))
+                    self.dispatcher.initialize(
+                        id2word=self.id2word, num_topics=self.num_topics, chunksize=chunksize,
+                        alpha=alpha, eta=eta, distributed=False
+                    )
+                    self.numworkers = len(self.dispatcher.getworkers())
+                    logger.info("using distributed version with %i workers", self.numworkers)
+            except Exception as err:
+                logger.error("failed to initialize distributed LDA (%s)", err)
+                raise RuntimeError("failed to initialize distributed LDA (%s)" % err)
+
+        # Initialize the variational distribution q(beta|lambda)
+        self.state = LdaState(self.eta, (self.num_topics, self.num_terms), dtype=self.dtype)
+        self.state.sstats[...] = self.random_state.gamma(100., 1. / 100., (self.num_topics, self.num_terms))
         self.expElogbeta = np.exp(self.get_Elogbeta(self.lambda_kv, self.nu2_kv))
+
+        # Check that we haven't accidentally fallen back to np.float64
+        assert self.eta.dtype == self.dtype
+        assert self.expElogbeta.dtype == self.dtype
+
+        # if a training corpus was provided, start estimating the model right away
+        if corpus is not None:
+            use_numpy = self.dispatcher is not None
+            self.update(corpus, chunks_as_numpy=use_numpy)
 
     def sync_state(self, current_Elogbeta=None):
         """Propagate the states topic probabilities to the inner object's attribute.
