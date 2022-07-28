@@ -56,14 +56,14 @@ class LdaCorrelatedModel(LdaModel):
                 * 'asymmetric': Uses a fixed normalized asymmetric prior of `1.0 / (topic_index + sqrt(num_topics))`,
                 * 'auto': Learns an asymmetric prior from the corpus (not available if `distributed==True`).
         eta : {float, numpy.ndarray of float, list of float, str}, optional
-             A-priori belief on topic-word distribution, this can be:
-                 * scalar for a symmetric prior over topic-word distribution,
-                 * 1D array of length equal to num_words to denote an asymmetric user defined prior for each word,
-                 * matrix of shape (num_topics, num_words) to assign a probability for each word-topic combination.
+            A-priori belief on topic-word distribution, this can be:
+                * scalar for a symmetric prior over topic-word distribution,
+                * 1D array of length equal to num_words to denote an asymmetric user defined prior for each word,
+                * matrix of shape (num_topics, num_words) to assign a probability for each word-topic combination.
 
-             Alternatively default prior selecting strategies can be employed by supplying a string:
-                 * 'symmetric': (default) Uses a fixed symmetric prior of `1.0 / num_topics`,
-                 * 'auto': Learns an asymmetric prior from the corpus.
+            Alternatively default prior selecting strategies can be employed by supplying a string:
+                * 'symmetric': (default) Uses a fixed symmetric prior of `1.0 / num_topics`,
+                * 'auto': Learns an asymmetric prior from the corpus.
         decay : float, optional
             A number between (0.5, 1] to weight what percentage of the previous lambda value is forgotten
             when each new document is examined.
@@ -253,7 +253,7 @@ class LdaCorrelatedModel(LdaModel):
         logger.info("topic diff=%f, rho=%f", diff, rho)
 
         if self.optimize_eta:
-             self.update_eta(self.state.get_lambda(), rho)
+            self.update_eta(self.state.get_lambda(), rho)
 
         if not extra_pass:
             # only update if this isn't an additional pass
