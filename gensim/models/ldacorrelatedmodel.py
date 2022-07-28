@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class LdaCorrelatedModel(LdaModel):
     def __init__(self, corpus=None, num_topics=100, id2word=None,
                  distributed=False, chunksize=2000, passes=1, update_every=1,
-                 alpha='symmetric', decay=0.5, offset=1.0, eval_every=10,
+                 alpha='symmetric', eta=None, decay=0.5, offset=1.0, eval_every=10,
                  iterations=50, gamma_threshold=0.001, minimum_probability=0.01,
                  random_state=None, ns_conf=None, minimum_phi_value=0.01,
                  per_word_topics=False, callbacks=None, dtype=np.float32, adaptive_learning_rate=False):
@@ -55,6 +55,15 @@ class LdaCorrelatedModel(LdaModel):
                 * 'symmetric': (default) Uses a fixed symmetric prior of `1.0 / num_topics`,
                 * 'asymmetric': Uses a fixed normalized asymmetric prior of `1.0 / (topic_index + sqrt(num_topics))`,
                 * 'auto': Learns an asymmetric prior from the corpus (not available if `distributed==True`).
+        eta : {float, numpy.ndarray of float, list of float, str}, optional
+             A-priori belief on topic-word distribution, this can be:
+                 * scalar for a symmetric prior over topic-word distribution,
+                 * 1D array of length equal to num_words to denote an asymmetric user defined prior for each word,
+                 * matrix of shape (num_topics, num_words) to assign a probability for each word-topic combination.
+
+             Alternatively default prior selecting strategies can be employed by supplying a string:
+                 * 'symmetric': (default) Uses a fixed symmetric prior of `1.0 / num_topics`,
+                 * 'auto': Learns an asymmetric prior from the corpus.
         decay : float, optional
             A number between (0.5, 1] to weight what percentage of the previous lambda value is forgotten
             when each new document is examined.
@@ -86,8 +95,6 @@ class LdaCorrelatedModel(LdaModel):
             Data-type to use during calculations inside model. All inputs are also converted.
 
         """
-        eta = None
-
         self.dtype = np.finfo(dtype).dtype
 
         # store user-supplied parameters
@@ -244,6 +251,9 @@ class LdaCorrelatedModel(LdaModel):
         self.print_topics(5)
         diff = mean_absolute_difference(previous_Elogbeta.ravel(), current_Elogbeta.ravel())
         logger.info("topic diff=%f, rho=%f", diff, rho)
+
+        if self.optimize_eta:
+             self.update_eta(self.state.get_lambda(), rho)
 
         if not extra_pass:
             # only update if this isn't an additional pass
