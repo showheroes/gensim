@@ -462,7 +462,7 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         self.per_word_topics = per_word_topics
         self.callbacks = callbacks
 
-        self.mu_kv = np.zeros((self.num_topics, self.num_terms))  # TODO check dimensions
+        self.mu_kv = np.zeros((self.num_topics, self.num_terms))
         self.sigma2_kv = np.ones((self.num_topics, self.num_terms))
         self.sigma2_inverse_kv = 1 / self.sigma2_kv
 
@@ -515,7 +515,7 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
 
         # Initialize the variational distribution q(beta|lambda)
         self.state = LdaState(self.eta, (self.num_topics, self.num_terms), dtype=self.dtype)
-        self.state.sstats[...] = self.random_state.gamma(100., 1. / 100., (self.num_topics, self.num_terms))  # TODO change
+        self.state.sstats[...] = self.random_state.gamma(100., 1. / 100., (self.num_topics, self.num_terms))
         current_Elogbeta = self.get_Elogbeta(self.lambda_kv, self.nu2_kv)
         self.expElogbeta = np.exp(current_Elogbeta)
 
@@ -1124,7 +1124,7 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             result = 0.0
             result -= 0.5 * np.sum(nu2_v * self.sigma2_inverse_kv[k])
             result -= np.sum(self.state.sstats[k] * (1/self.zeta_k[k]) * np.exp(self.lambda_kv[k] + 0.5 * nu2_v))
-            result += 0.5 * np.sum(np.log(nu2_v) + np.log(2 * np.pi) + 1)  # TODO safe_log
+            result += 0.5 * np.sum(np.log(nu2_v) + np.log(2 * np.pi) + 1)
 
             return -result
 
@@ -1132,11 +1132,14 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             result_v = np.zeros(self.num_terms)
             result_v -= 0.5 * self.sigma2_inverse_kv[k]
             result_v -= (self.state.sstats[k] / (2 * self.zeta_k[k])) * np.exp(self.lambda_kv[k] + 0.5 * nu2_v)
-            result_v += 1 / (2 * nu2_v)  # TODO safe_division
+            result_v += 1 / (2 * nu2_v)
 
             return -result_v
 
-        constraints = [(0, None) for _ in range(self.num_terms)]
+        # we use epsilon as min to prevent division by 0 and log from 0
+        epsilon = np.finfo(self.dtype).eps
+        constraints = [(epsilon, None) for _ in range(self.num_terms)]
+
         res = fmin_l_bfgs_b(f, self.nu2_kv[k], args=(k,), fprime=df, bounds=constraints)
         assert res[2]["warnflag"] == 0
         self.nu2_kv[k] = res[0]
@@ -1211,7 +1214,7 @@ class LdaModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
 
         # E[log q(beta | lambda, nu2)]
         Elogqbeta_k = np.zeros(self.num_topics)
-        Elogqbeta_k -= 0.5 * (np.sum(np.log(nu2_kv), 1) + self.num_terms)  # TODO safe_log
+        Elogqbeta_k -= 0.5 * (np.sum(np.log(nu2_kv), 1) + self.num_terms)
 
         score += np.sum(Elogpbeta_k - Elogqbeta_k)
 
