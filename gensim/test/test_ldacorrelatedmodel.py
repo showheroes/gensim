@@ -16,6 +16,10 @@ class TestLdaCorrelatedModel(TestLdaModel):
         self.class_ = ldacorrelatedmodel.LdaCorrelatedModel
         self.model = self.class_(corpus, id2word=dictionary, num_topics=2, passes=100)
 
+    # override LdaModel because beta variational parameters are not in LdaState
+    def test_sync_state(self):
+        pass
+
 
 if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.DEBUG)

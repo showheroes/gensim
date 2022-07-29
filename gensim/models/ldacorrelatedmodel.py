@@ -21,7 +21,7 @@ class LdaCorrelatedModel(LdaModel):
                  alpha='symmetric', eta=None, decay=0.5, offset=1.0, eval_every=10,
                  iterations=50, gamma_threshold=0.001, minimum_probability=0.01,
                  random_state=None, ns_conf=None, minimum_phi_value=0.01,
-                 per_word_topics=False, callbacks=None, dtype=np.float32, adaptive_learning_rate=False):
+                 per_word_topics=False, callbacks=None, dtype=np.float32):
         """
 
         Parameters
@@ -95,6 +95,9 @@ class LdaCorrelatedModel(LdaModel):
             Data-type to use during calculations inside model. All inputs are also converted.
 
         """
+        # TODO delete eta explicitly
+        adaptive_learning_rate = False  # not tested
+
         self.dtype = np.finfo(dtype).dtype
 
         # store user-supplied parameters
@@ -133,14 +136,6 @@ class LdaCorrelatedModel(LdaModel):
 
         self.adaptive_learning_rate = adaptive_learning_rate
 
-        self.mu_kv = np.zeros((self.num_topics, self.num_terms))
-        self.sigma2_kv = np.ones((self.num_topics, self.num_terms))
-        self.sigma2_inverse_kv = 1 / self.sigma2_kv
-
-        self.lambda_kv = np.random.uniform(size=(self.num_topics, self.num_terms))
-        self.nu2_kv = np.ones((self.num_topics, self.num_terms))
-        self.zeta_k = np.sum(np.exp(self.lambda_kv + 0.5 * self.nu2_kv), 1)
-
         self.alpha, self.optimize_alpha = self.init_dir_prior(alpha, 'alpha')
         assert self.alpha.shape == (self.num_topics,), \
             "Invalid alpha shape. Got shape %s, but expected (%d, )" % (str(self.alpha.shape), self.num_topics)
@@ -155,6 +150,14 @@ class LdaCorrelatedModel(LdaModel):
             (str(self.eta.shape), self.num_terms, self.num_topics, self.num_terms))
 
         self.random_state = utils.get_random_state(random_state)
+
+        self.mu_kv = np.zeros((self.num_topics, self.num_terms))
+        self.sigma2_kv = np.ones((self.num_topics, self.num_terms))
+        self.sigma2_inverse_kv = 1 / self.sigma2_kv
+
+        self.lambda_kv = np.random.uniform(low=0.0, high=1.0, size=(self.num_topics, self.num_terms))
+        self.nu2_kv = 1 + np.random.uniform(low=-0.5, high=0.5, size=(self.num_topics, self.num_terms))
+        self.zeta_k = np.sum(np.exp(self.lambda_kv + 0.5 * self.nu2_kv), 1)
 
         # VB constants
         self.iterations = iterations
