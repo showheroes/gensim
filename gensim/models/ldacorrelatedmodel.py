@@ -4,7 +4,7 @@ import numpy as np
 import six
 from scipy.special import gammaln
 
-from gensim import utils
+from gensim import utils, matutils
 from gensim.matutils import (
     dirichlet_expectation, logsumexp, mean_absolute_difference,
 )
@@ -304,3 +304,70 @@ class LdaCorrelatedModel(LdaModel):
         score += np.sum(gammaln(sum_eta) - gammaln(np.sum(_lambda, 1)))
 
         return score
+
+    def show_topics(self, num_topics=10, num_words=10, log=False, formatted=True):
+        """Get a representation for selected topics.
+
+        Parameters
+        ----------
+        num_topics : int, optional
+            Number of topics to be returned. Unlike LSA, there is no natural ordering between the topics in LDA.
+            The returned topics subset of all topics is therefore arbitrary and may change between two LDA
+            training runs.
+        num_words : int, optional
+            Number of words to be presented for each topic. These will be the most relevant words (assigned the highest
+            probability for each topic).
+        log : bool, optional
+            Whether the output is also logged, besides being returned.
+        formatted : bool, optional
+            Whether the topic representations should be formatted as strings. If False, they are returned as
+            2 tuples of (word, probability).
+
+        Returns
+        -------
+        list of {str, tuple of (str, float)}
+            a list of topics, each represented either as a string (when `formatted` == True) or word-probability
+            pairs.
+
+        """
+        if num_topics < 0 or num_topics >= self.num_topics:
+            num_topics = self.num_topics
+            chosen_topics = range(num_topics)
+        else:
+            num_topics = min(num_topics, self.num_topics)
+
+            # add a little random jitter, to randomize results around the same alpha
+            sort_alpha = self.alpha + 0.0001 * self.random_state.rand(len(self.alpha))
+            # random_state.rand returns float64, but converting back to dtype won't speed up anything
+
+            sorted_topics = list(matutils.argsort(sort_alpha))
+            chosen_topics = sorted_topics[:num_topics // 2] + sorted_topics[-num_topics // 2:]
+
+        shown = []
+
+        topic = self.state.get_lambda()
+        for i in chosen_topics:
+            topic_ = topic[i]
+            topic_ = topic_ / topic_.sum()  # normalize to probability distribution
+            bestn = matutils.argsort(topic_, num_words, reverse=True)
+            topic_ = [(self.id2word[id], topic_[id]) for id in bestn]
+            if formatted:
+                topic_ = ' + '.join('%.3f*"%s"' % (v, k) for k, v in topic_)
+
+            shown.append((i, topic_))
+            if log:
+                logger.info("topic #%i (%.3f): %s", i, self.alpha[i], topic_)
+
+        return shown
+
+    def get_topics(self):
+        """Get the term-topic matrix learned during inference.
+
+        Returns
+        -------
+        numpy.ndarray
+            The probability for each word in each topic, shape (`num_topics`, `vocabulary_size`).
+
+        """
+        topics = self.state.get_lambda()
+        return topics / topics.sum(axis=1)[:, None]
