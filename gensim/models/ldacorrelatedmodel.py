@@ -151,12 +151,12 @@ class LdaCorrelatedModel(LdaModel):
 
         self.random_state = utils.get_random_state(random_state)
 
-        self.mu_kv = np.zeros((self.num_topics, self.num_terms))
-        self.sigma2_kv = np.ones((self.num_topics, self.num_terms))
+        self.mu_kv = np.zeros((self.num_topics, self.num_terms), dtype=self.dtype)
+        self.sigma2_kv = np.ones((self.num_topics, self.num_terms), dtype=self.dtype)
         self.sigma2_inverse_kv = 1 / self.sigma2_kv
 
-        self.lambda_kv = np.random.uniform(low=0.0, high=1.0, size=(self.num_topics, self.num_terms))
-        self.nu2_kv = 1 + np.random.uniform(low=-0.5, high=0.5, size=(self.num_topics, self.num_terms))
+        self.lambda_kv = np.random.uniform(low=0.0, high=1.0, size=(self.num_topics, self.num_terms)).astype(self.dtype)
+        self.nu2_kv = 1.0 + np.random.uniform(low=-0.5, high=0.5, size=(self.num_topics, self.num_terms)).astype(self.dtype)
         self.zeta_k = np.sum(np.exp(self.lambda_kv + 0.5 * self.nu2_kv), 1)
 
         # VB constants
@@ -379,13 +379,13 @@ class LdaCorrelatedModel(LdaModel):
         score *= subsample_ratio
 
         # E[log p(beta | mu, Sigma)]
-        Elogpbeta_k = np.zeros(self.num_topics)
+        Elogpbeta_k = np.zeros(self.num_topics, dtype=self.dtype)
         Elogpbeta_k += 0.5 * np.log(np.prod(self.sigma2_inverse_kv, 1))
         Elogpbeta_k -= 0.5 * np.sum(nu2_kv * self.sigma2_inverse_kv, 1)
         Elogpbeta_k -= 0.5 * np.sum((lambda_kv - self.mu_kv) * self.sigma2_inverse_kv * (lambda_kv - self.mu_kv), 1)
 
         # E[log q(beta | lambda, nu2)]
-        Elogqbeta_k = np.zeros(self.num_topics)
+        Elogqbeta_k = np.zeros(self.num_topics, dtype=self.dtype)
         Elogqbeta_k -= 0.5 * (np.sum(np.log(nu2_kv), 1) + self.num_terms)
 
         score += np.sum(Elogpbeta_k - Elogqbeta_k)
