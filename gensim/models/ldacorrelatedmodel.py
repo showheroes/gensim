@@ -317,6 +317,9 @@ class LdaCorrelatedModel(LdaModel):
 
         return Elogbeta
 
+    def get_beta(self, lambda_kv, nu2_kv):
+        return lambda_kv + 0.5 * nu2_kv
+
     def bound(self, corpus, gamma=None, lambda_kv=None, nu2_kv=None, subsample_ratio=1.0):
         """Estimate the variational bound of documents from the corpus as E_q[log p(corpus)] - E_q[log q(corpus)].
 
@@ -429,7 +432,7 @@ class LdaCorrelatedModel(LdaModel):
 
         shown = []
 
-        topic = self.state.get_lambda()
+        topic = self.get_beta(self.lambda_kv, self.nu2_kv)
         for i in chosen_topics:
             topic_ = topic[i]
             topic_ = topic_ / topic_.sum()  # normalize to probability distribution
@@ -453,5 +456,5 @@ class LdaCorrelatedModel(LdaModel):
             The probability for each word in each topic, shape (`num_topics`, `vocabulary_size`).
 
         """
-        topics = self.state.get_lambda()
+        topics = self.get_beta(self.lambda_kv, self.nu2_kv)
         return topics / topics.sum(axis=1)[:, None]
