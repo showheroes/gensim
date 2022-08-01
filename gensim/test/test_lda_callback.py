@@ -14,7 +14,7 @@ import time
 from gensim.models import LdaModel
 from gensim.test.utils import datapath, common_dictionary
 from gensim.corpora import MmCorpus
-from gensim.models.callbacks import CoherenceMetric
+from gensim.models.callbacks import CoherenceMetric, CoherencePerTopicMetric
 
 try:
     from visdom import Visdom
@@ -30,7 +30,9 @@ class TestLdaCallback(unittest.TestCase):
         self.corpus = MmCorpus(datapath('testcorpus.mm'))
         self.ch_umass = CoherenceMetric(corpus=self.corpus, coherence="u_mass", logger="visdom", title="Coherence")
         self.callback = [self.ch_umass]
-        self.model = LdaModel(id2word=common_dictionary, num_topics=2, passes=10, callbacks=self.callback)
+        self.ch_umass_per_topic = CoherencePerTopicMetric(corpus=self.corpus, coherence="u_mass", logger="visdom", title="Coherence_per_topic")
+        self.callbacks_on_train_end = [self.ch_umass_per_topic]
+        self.model = LdaModel(id2word=common_dictionary, num_topics=2, passes=10, callbacks=self.callback, callbacks_on_train_end=self.callbacks_on_train_end)
 
         self.host = "http://localhost"
         self.port = 8097
