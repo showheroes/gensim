@@ -178,7 +178,8 @@ class CoherenceMetric(Metric):
 
     """
     def __init__(self, corpus=None, texts=None, dictionary=None, coherence=None,
-                 window_size=None, topn=10, logger=None, viz_env=None, title=None):
+                 window_size=None, topn=10, logger=None, viz_env="main", title=None,
+                 visdom_server="http://localhost", visdom_port=8097, visdom_base_url="/"):
         """
 
         Parameters
@@ -209,10 +210,16 @@ class CoherenceMetric(Metric):
            Monitor training process using one of the available methods. 'shell' will print the coherence value in
            the active shell, while 'visdom' will visualize the coherence value with increasing epochs using the Visdom
            visualization framework.
-        viz_env : object, optional
-            Visdom environment to use for plotting the graph. Unused.
+        viz_env : str
+            Visdom environment to use for plotting the graph.
         title : str, optional
             Title of the graph plot in case `logger == 'visdom'`. Unused.
+        visdom_server: str
+            The hostname of visdom server.
+        visdom_port: int
+            The port for visdom server.
+        visdom_base_url: str
+            The base visdom server url.
 
         """
         self.corpus = corpus
@@ -224,6 +231,9 @@ class CoherenceMetric(Metric):
         self.logger = logger
         self.viz_env = viz_env
         self.title = title
+        self.visdom_server = visdom_server
+        self.visdom_port = visdom_port
+        self.visdom_base_url = visdom_base_url
 
     def get_value(self, **kwargs):
         """Get the coherence score.
@@ -259,9 +269,110 @@ class CoherenceMetric(Metric):
         return cm.get_coherence()
 
 
+class CoherencePerTopicMetric(Metric):
+    """Metric class for coherence per topic evaluation.
+
+    See Also
+    --------
+    :class:`~gensim.models.coherencemodel.CoherenceModel`
+
+    """
+    def __init__(self, corpus=None, texts=None, dictionary=None, coherence=None,
+                 window_size=None, topn=10, logger=None, viz_env="main", title=None,
+                 visdom_server="http://localhost", visdom_port=8097, visdom_base_url="/"):
+        """
+
+        Parameters
+        ----------
+        corpus : {iterable of list of (int, float), scipy.sparse.csc}, optional
+            Stream of document vectors or sparse matrix of shape (`num_terms`, `num_documents`).
+        texts : list of char (str of length 1), optional
+            Tokenized texts needed for coherence models that use sliding window based probability estimator.
+        dictionary : :class:`~gensim.corpora.dictionary.Dictionary`, optional
+            Gensim dictionary mapping from integer IDs to words, needed to create corpus. If `model.id2word` is present,
+            this is not needed. If both are provided, `dictionary` will be used.
+        coherence : {'u_mass', 'c_v', 'c_uci', 'c_npmi'}, optional
+            Coherence measure to be used. 'c_uci' is also known as 'c_pmi' in the literature.
+            For 'u_mass', the corpus **MUST** be provided. If `texts` is provided, it will be converted
+            to corpus using the dictionary. For 'c_v', 'c_uci' and 'c_npmi', `texts` **MUST** be provided.
+            Corpus is not needed.
+        window_size : int, optional
+            Size of the window to be used for coherence measures using boolean
+            sliding window as their probability estimator. For 'u_mass' this doesn't matter.
+            If 'None', the default window sizes are used which are:
+
+                * `c_v` - 110
+                * `c_uci` - 10
+                * `c_npmi` - 10
+        topn : int, optional
+            Number of top words to be extracted from each topic.
+        logger : {'shell', 'visdom'}, optional
+           Monitor training process using one of the available methods. 'shell' will print the coherence value in
+           the active shell, while 'visdom' will visualize the coherence value with increasing epochs using the Visdom
+           visualization framework.
+        viz_env : str
+            Visdom environment to use for plotting the graph.
+        title : str, optional
+            Title of the graph plot in case `logger == 'visdom'`. Unused.
+        visdom_server: str
+            The hostname of visdom server.
+        visdom_port: int
+            The port for visdom server.
+        visdom_base_url: str
+            The base visdom server url.
+
+        """
+        self.corpus = corpus
+        self.dictionary = dictionary
+        self.coherence = coherence
+        self.texts = texts
+        self.window_size = window_size
+        self.topn = topn
+        self.logger = logger
+        self.viz_env = viz_env
+        self.title = title
+        self.visdom_server = visdom_server
+        self.visdom_port = visdom_port
+        self.visdom_base_url = visdom_base_url
+
+    def get_value(self, **kwargs):
+        """Get the coherence per topic score.
+
+        Parameters
+        ----------
+        **kwargs
+            Key word arguments to override the object's internal attributes.
+            One of the following parameters are expected:
+
+                * `model` - pre-trained topic model of type :class:`~gensim.models.ldamodel.LdaModel`, or one
+                  of its wrappers, such as :class:`~gensim.models.wrappers.ldamallet.LdaMallet` or
+                  :class:`~gensim.models.wrappers.ldavowpalwabbit.LdaVowpalWabbit`.
+                * `topics` - list of tokenized topics.
+
+        Returns
+        -------
+        numpy array
+            The coherence score per topic.
+
+        """
+        # only one of the model or topic would be defined
+        self.model = None
+        self.topics = None
+        super(CoherencePerTopicMetric, self).set_parameters(**kwargs)
+
+        cm = gensim.models.CoherenceModel(
+            model=self.model, topics=self.topics, texts=self.texts, corpus=self.corpus,
+            dictionary=self.dictionary, window_size=self.window_size,
+            coherence=self.coherence, topn=self.topn
+        )
+
+        return np.array(cm.get_coherence_per_topic())
+
+
 class PerplexityMetric(Metric):
     """Metric class for perplexity evaluation."""
-    def __init__(self, corpus=None, logger=None, viz_env=None, title=None):
+    def __init__(self, corpus=None, logger=None, viz_env="main", title=None,
+                 visdom_server="http://localhost", visdom_port=8097, visdom_base_url="/"):
         """
 
         Parameters
@@ -272,16 +383,25 @@ class PerplexityMetric(Metric):
            Monitor training process using one of the available methods. 'shell' will print the perplexity value in
            the active shell, while 'visdom' will visualize the coherence value with increasing epochs using the Visdom
            visualization framework.
-        viz_env : object, optional
-            Visdom environment to use for plotting the graph. Unused.
+        viz_env : str
+            Visdom environment to use for plotting the graph.
         title : str, optional
             Title of the graph plot in case `logger == 'visdom'`. Unused.
+        visdom_server: str
+            The hostname of visdom server.
+        visdom_port: int
+            The port for visdom server.
+        visdom_base_url: str
+            The base visdom server url.
 
         """
         self.corpus = corpus
         self.logger = logger
         self.viz_env = viz_env
         self.title = title
+        self.visdom_server = visdom_server
+        self.visdom_port = visdom_port
+        self.visdom_base_url = visdom_base_url
 
     def get_value(self, **kwargs):
         """Get the coherence score.
@@ -310,7 +430,8 @@ class PerplexityMetric(Metric):
 class DiffMetric(Metric):
     """Metric class for topic difference evaluation."""
     def __init__(self, distance="jaccard", num_words=100, n_ann_terms=10, diagonal=True,
-                 annotation=False, normed=True, logger=None, viz_env=None, title=None):
+                 annotation=False, normed=True, logger=None, viz_env="main", title=None,
+                 visdom_server="http://localhost", visdom_port=8097, visdom_base_url="/"):
         """
 
         Parameters
@@ -331,10 +452,16 @@ class DiffMetric(Metric):
            Monitor training process using one of the available methods. 'shell' will print the coherence value in
            the active shell, while 'visdom' will visualize the coherence value with increasing epochs using the Visdom
            visualization framework.
-        viz_env : object, optional
-            Visdom environment to use for plotting the graph. Unused.
+        viz_env : str
+            Visdom environment to use for plotting the graph.
         title : str, optional
             Title of the graph plot in case `logger == 'visdom'`. Unused.
+        visdom_server: str
+            The hostname of visdom server.
+        visdom_port: int
+            The port for visdom server.
+        visdom_base_url: str
+            The base visdom server url.
 
         """
         self.distance = distance
@@ -346,6 +473,9 @@ class DiffMetric(Metric):
         self.logger = logger
         self.viz_env = viz_env
         self.title = title
+        self.visdom_server = visdom_server
+        self.visdom_port = visdom_port
+        self.visdom_base_url = visdom_base_url
 
     def get_value(self, **kwargs):
         """Get the difference between each pair of topics in two topic models.
@@ -377,7 +507,8 @@ class DiffMetric(Metric):
 class ConvergenceMetric(Metric):
     """Metric class for convergence evaluation. """
     def __init__(self, distance="jaccard", num_words=100, n_ann_terms=10, diagonal=True,
-                 annotation=False, normed=True, logger=None, viz_env=None, title=None):
+                 annotation=False, normed=True, logger=None, viz_env="main", title=None,
+                 visdom_server="http://localhost", visdom_port=8097, visdom_base_url="/"):
         """
 
         Parameters
@@ -398,10 +529,16 @@ class ConvergenceMetric(Metric):
            Monitor training process using one of the available methods. 'shell' will print the coherence value in
            the active shell, while 'visdom' will visualize the coherence value with increasing epochs using the Visdom
            visualization framework.
-        viz_env : object, optional
-            Visdom environment to use for plotting the graph. Unused.
+        viz_env : str
+            Visdom environment to use for plotting the graph.
         title : str, optional
             Title of the graph plot in case `logger == 'visdom'`. Unused.
+        visdom_server: str
+            The hostname of visdom server.
+        visdom_port: int
+            The port for visdom server.
+        visdom_base_url: str
+            The base visdom server url.
 
        """
         self.distance = distance
@@ -413,6 +550,9 @@ class ConvergenceMetric(Metric):
         self.logger = logger
         self.viz_env = viz_env
         self.title = title
+        self.visdom_server = visdom_server
+        self.visdom_port = visdom_port
+        self.visdom_base_url = visdom_base_url
 
     def get_value(self, **kwargs):
         """Get the sum of each element in the difference matrix between each pair of topics in two topic models.
@@ -481,10 +621,17 @@ class Callback(object):
             self.previous = copy.deepcopy(model)
             # store diff diagonals of previous epochs
             self.diff_mat = Queue()
-        if any(metric.logger == "visdom" for metric in self.metrics):
+        metrics_with_visdom = [metric for metric in self.metrics if metric.logger == "visdom"]
+        if any(metrics_with_visdom):
             if not VISDOM_INSTALLED:
                 raise ImportError("Please install Visdom for visualization")
-            self.viz = Visdom()
+            # lets assume that all metrics have same visdom arguments
+            self.viz = Visdom(
+                server=metrics_with_visdom[0].visdom_server,
+                port=metrics_with_visdom[0].visdom_port,
+                base_url=metrics_with_visdom[0].visdom_base_url,
+                env=metrics_with_visdom[0].viz_env,
+            )
             # store initial plot windows of every metric (same window will be updated with increasing epochs)
             self.windows = []
         if any(metric.logger == "shell" for metric in self.metrics):
@@ -564,6 +711,66 @@ class Callback(object):
         # check for any metric which need model state from previous epoch
         if any(isinstance(metric, (DiffMetric, ConvergenceMetric)) for metric in self.metrics):
             self.previous = copy.deepcopy(self.model)
+
+        return current_metrics
+
+
+class CallbackOnTrainEnd(object):
+    """A class representing routines called reactively at specific phases during trained.
+
+    The values are stored at the end of the training process. The following metric scores are currently available:
+
+        * :class:`~gensim.models.callbacks.CoherenceMetric`
+        * :class:`~gensim.models.callbacks.PerplexityMetric`
+        * :class:`~gensim.models.callbacks.CoherencePerTopicMetric`
+
+    """
+    def __init__(self, metrics):
+        """
+
+        Parameters
+        ----------
+        metrics : list of :class:`~gensim.models.callbacks.Metric`
+            The list of metrics to be reported by the callback.
+
+        """
+        self.metrics = metrics
+
+    def set_model(self, model):
+        """Save the model instance.
+
+        Parameters
+        ----------
+        model : :class:`~gensim.models.basemodel.BaseTopicModel`
+            The model for which the training will be reported by the callback.
+
+        """
+        self.model = model
+
+    def on_train_end(self, topics=None):
+        """Report the metric value.
+
+        Called at the end of the training process.
+
+        Parameters
+        ----------
+        topics : list of list of str, optional
+            List of tokenized topics. This is required for the coherence metric.
+
+        Returns
+        -------
+        dict of (str, object)
+            Mapping from metric names to their values. The type of each value depends on the metric type.
+
+        """
+        # stores metric values
+        current_metrics = {}
+
+        for _, metric in enumerate(self.metrics):
+            label = str(metric)
+            value = metric.get_value(topics=topics, model=self.model)
+
+            current_metrics[label] = value
 
         return current_metrics
 
