@@ -209,6 +209,19 @@ class LdaCorrelatedModel(LdaModel):
             use_numpy = self.dispatcher is not None
             self.update(corpus, chunks_as_numpy=use_numpy)
 
+    def __str__(self):
+        """Get a string representation of the current object.
+
+        Returns
+        -------
+        str
+            Human readable representation of the most important model parameters.
+
+        """
+        return "LdaCorrelatedModel(num_terms=%s, num_topics=%s, decay=%s, chunksize=%s)" % (
+            self.num_terms, self.num_topics, self.decay, self.chunksize
+        )
+
     def sync_state(self, current_Elogbeta=None):
         """Propagate the states topic probabilities to the inner object's attribute.
 
