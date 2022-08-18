@@ -21,7 +21,7 @@ class LdaCorrelatedModel(LdaModel):
                  alpha='symmetric', eta=None, decay=0.5, offset=1.0, eval_every=10,
                  iterations=50, gamma_threshold=0.001, minimum_probability=0.01,
                  random_state=None, ns_conf=None, minimum_phi_value=0.01,
-                 per_word_topics=False, callbacks=None, dtype=np.float32):
+                 per_word_topics=False, callbacks=None, callbacks_on_train_end=None, dtype=np.float32):
         """
 
         Parameters
@@ -91,6 +91,8 @@ class LdaCorrelatedModel(LdaModel):
             each word, along with their phi values multiplied by the feature length (i.e. word count).
         callbacks : list of :class:`~gensim.models.callbacks.Callback`
             Metric callbacks to log and visualize evaluation metrics of the model during training.
+        callbacks_on_train_end : list of :class:`~gensim.models.callbacks.CallbackOnTrainEnd`
+            Metric callbacks at the end of the training process.
         dtype : {numpy.float16, numpy.float32, numpy.float64}, optional
             Data-type to use during calculations inside model. All inputs are also converted.
 
@@ -133,6 +135,8 @@ class LdaCorrelatedModel(LdaModel):
         self.minimum_phi_value = minimum_phi_value
         self.per_word_topics = per_word_topics
         self.callbacks = callbacks
+        self.callbacks_on_train_end = callbacks_on_train_end
+        self.metrics_on_train_end = {}
 
         self.adaptive_learning_rate = adaptive_learning_rate
 
