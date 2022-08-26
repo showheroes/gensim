@@ -258,9 +258,7 @@ class LdaCorrelatedModel(LdaModel):
         self.state.blend(rho, other)
 
         for k in range(self.num_topics):
-            self.optimize_zeta_for_topic(k)
             self.optimize_lambda_for_topic(k)
-            self.optimize_zeta_for_topic(k)
             self.optimize_nu2_for_topic(k)
             self.optimize_zeta_for_topic(k)
 
