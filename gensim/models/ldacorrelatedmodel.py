@@ -2,6 +2,7 @@ import logging
 
 import numpy as np
 import six
+from scipy.optimize import fmin_l_bfgs_b, minimize
 from scipy.special import gammaln
 
 from gensim import utils, matutils
@@ -20,7 +21,7 @@ class LdaCorrelatedModel(LdaModel):
                  alpha='symmetric', eta=None, decay=0.5, offset=1.0, eval_every=10,
                  iterations=50, gamma_threshold=0.001, minimum_probability=0.01,
                  random_state=None, ns_conf=None, minimum_phi_value=0.01,
-                 per_word_topics=False, callbacks=None, dtype=np.float32, adaptive_learning_rate=False):
+                 per_word_topics=False, callbacks=None, callbacks_on_train_end=None, dtype=np.float32):
         """
 
         Parameters
@@ -90,10 +91,15 @@ class LdaCorrelatedModel(LdaModel):
             each word, along with their phi values multiplied by the feature length (i.e. word count).
         callbacks : list of :class:`~gensim.models.callbacks.Callback`
             Metric callbacks to log and visualize evaluation metrics of the model during training.
+        callbacks_on_train_end : list of :class:`~gensim.models.callbacks.CallbackOnTrainEnd`
+            Metric callbacks at the end of the training process.
         dtype : {numpy.float16, numpy.float32, numpy.float64}, optional
             Data-type to use during calculations inside model. All inputs are also converted.
 
         """
+        # TODO delete eta explicitly
+        adaptive_learning_rate = False  # not tested
+
         self.dtype = np.finfo(dtype).dtype
 
         # store user-supplied parameters
@@ -129,6 +135,8 @@ class LdaCorrelatedModel(LdaModel):
         self.minimum_phi_value = minimum_phi_value
         self.per_word_topics = per_word_topics
         self.callbacks = callbacks
+        self.callbacks_on_train_end = callbacks_on_train_end
+        self.metrics_on_train_end = {}
 
         self.adaptive_learning_rate = adaptive_learning_rate
 
@@ -146,6 +154,14 @@ class LdaCorrelatedModel(LdaModel):
             (str(self.eta.shape), self.num_terms, self.num_topics, self.num_terms))
 
         self.random_state = utils.get_random_state(random_state)
+
+        self.mu_kv = np.zeros((self.num_topics, self.num_terms), dtype=self.dtype)
+        self.sigma2_kv = np.ones((self.num_topics, self.num_terms), dtype=self.dtype)
+        self.sigma2_inverse_kv = 1 / self.sigma2_kv
+
+        self.lambda_kv = np.random.uniform(low=0.0, high=1.0, size=(self.num_topics, self.num_terms)).astype(self.dtype)
+        self.nu2_kv = 1.0 + np.random.uniform(low=-0.5, high=0.5, size=(self.num_topics, self.num_terms)).astype(self.dtype)
+        self.zeta_k = np.sum(np.exp(self.lambda_kv + 0.5 * self.nu2_kv), 1)
 
         # VB constants
         self.iterations = iterations
@@ -182,7 +198,7 @@ class LdaCorrelatedModel(LdaModel):
         # Initialize the variational distribution q(beta|lambda)
         self.state = LdaState(self.eta, (self.num_topics, self.num_terms), dtype=self.dtype)
         self.state.sstats[...] = self.random_state.gamma(100., 1. / 100., (self.num_topics, self.num_terms))
-        self.expElogbeta = np.exp(dirichlet_expectation(self.state.sstats))
+        self.expElogbeta = np.exp(self.get_Elogbeta(self.lambda_kv, self.nu2_kv))
 
         # Check that we haven't accidentally fallen back to np.float64
         assert self.eta.dtype == self.dtype
@@ -192,6 +208,19 @@ class LdaCorrelatedModel(LdaModel):
         if corpus is not None:
             use_numpy = self.dispatcher is not None
             self.update(corpus, chunks_as_numpy=use_numpy)
+
+    def __str__(self):
+        """Get a string representation of the current object.
+
+        Returns
+        -------
+        str
+            Human readable representation of the most important model parameters.
+
+        """
+        return "LdaCorrelatedModel(num_terms=%s, num_topics=%s, decay=%s, chunksize=%s)" % (
+            self.num_terms, self.num_topics, self.decay, self.chunksize
+        )
 
     def sync_state(self, current_Elogbeta=None):
         """Propagate the states topic probabilities to the inner object's attribute.
@@ -204,7 +233,7 @@ class LdaCorrelatedModel(LdaModel):
 
         """
         if current_Elogbeta is None:
-            current_Elogbeta = self.state.get_Elogbeta()
+            current_Elogbeta = self.get_Elogbeta(self.lambda_kv, self.nu2_kv)
         self.expElogbeta = np.exp(current_Elogbeta)
         assert self.expElogbeta.dtype == self.dtype
 
@@ -225,10 +254,15 @@ class LdaCorrelatedModel(LdaModel):
         logger.debug("updating topics")
         # update self with the new blend; also keep track of how much did
         # the topics change through this update, to assess convergence
-        previous_Elogbeta = self.state.get_Elogbeta()
+        previous_Elogbeta = self.get_Elogbeta(self.lambda_kv, self.nu2_kv)
         self.state.blend(rho, other)
 
-        current_Elogbeta = self.state.get_Elogbeta()
+        for k in range(self.num_topics):
+            self.optimize_lambda_for_topic(k)
+            self.optimize_nu2_for_topic(k)
+            self.optimize_zeta_for_topic(k)
+
+        current_Elogbeta = self.get_Elogbeta(self.lambda_kv, self.nu2_kv)
         self.sync_state(current_Elogbeta)
 
         # print out some debug info at the end of each EM iteration
@@ -243,7 +277,65 @@ class LdaCorrelatedModel(LdaModel):
             # only update if this isn't an additional pass
             self.num_updates += other.numdocs
 
-    def bound(self, corpus, gamma=None, subsample_ratio=1.0):
+    def optimize_zeta_for_topic(self, k):
+        self.zeta_k[k] = np.sum(np.exp(self.lambda_kv[k] + 0.5 * self.nu2_kv[k]))
+
+    def optimize_lambda_for_topic(self, k):
+        def f(lambda_v, k):
+            result = 0.0
+            result -= 0.5 * np.sum((lambda_v - self.mu_kv[k]) * self.sigma2_inverse_kv[k] * (lambda_v - self.mu_kv[k]))
+            result += np.sum(self.state.sstats[k] * (lambda_v - (1/self.zeta_k[k]) * np.exp(lambda_v + 0.5 * self.nu2_kv[k])))
+
+            return -result
+
+        def df(lambda_v, k):
+            result_v = np.zeros(self.num_terms)
+            result_v -= self.sigma2_inverse_kv[k] * (lambda_v - self.mu_kv[k])
+            result_v += self.state.sstats[k] * (1 - (1/self.zeta_k[k]) * np.exp(lambda_v + 0.5 * self.nu2_kv[k]))
+
+            return -result_v
+
+        res = minimize(f, self.lambda_kv[k], args=(k,), method="BFGS", jac=df)
+        assert res.success == True
+        self.lambda_kv[k] = res.x
+
+    def optimize_nu2_for_topic(self, k):
+        def f(nu2_v, k):
+            result = 0.0
+            result -= 0.5 * np.sum(nu2_v * self.sigma2_inverse_kv[k])
+            result -= np.sum(self.state.sstats[k] * (1/self.zeta_k[k]) * np.exp(self.lambda_kv[k] + 0.5 * nu2_v))
+            result += 0.5 * np.sum(np.log(nu2_v))
+
+            return -result
+
+        def df(nu2_v, k):
+            result_v = np.zeros(self.num_terms)
+            result_v -= 0.5 * self.sigma2_inverse_kv[k]
+            result_v -= (self.state.sstats[k] / (2 * self.zeta_k[k])) * np.exp(self.lambda_kv[k] + 0.5 * nu2_v)
+            result_v += 1 / (2 * nu2_v)
+
+            return -result_v
+
+        # we use epsilon as min to prevent division by 0 and log from 0
+        epsilon = np.finfo(self.dtype).eps
+        constraints = [(epsilon, None) for _ in range(self.num_terms)]
+
+        res = fmin_l_bfgs_b(f, self.nu2_kv[k], args=(k,), fprime=df, bounds=constraints)
+        assert res[2]["warnflag"] == 0
+        self.nu2_kv[k] = res[0]
+
+    def get_Elogbeta(self, lambda_kv, nu2_kv):
+        zeta_k1 = self.zeta_k[:, np.newaxis]
+        Elogbeta = np.zeros((self.num_topics, self.num_terms), dtype=self.dtype)
+        Elogbeta += lambda_kv - np.log(zeta_k1) + 1
+        Elogbeta -= (1/zeta_k1) * np.sum(np.exp(lambda_kv + 0.5 * nu2_kv), 1, keepdims=True)
+
+        return Elogbeta
+
+    def get_beta(self, lambda_kv, nu2_kv):
+        return lambda_kv + 0.5 * nu2_kv
+
+    def bound(self, corpus, gamma=None, lambda_kv=None, nu2_kv=None, subsample_ratio=1.0):
         """Estimate the variational bound of documents from the corpus as E_q[log p(corpus)] - E_q[log q(corpus)].
 
         Parameters
@@ -253,6 +345,10 @@ class LdaCorrelatedModel(LdaModel):
             variational bounds.
         gamma : numpy.ndarray, optional
             Topic weight variational parameters for each document. If not supplied, it will be inferred from the model.
+        lambda_kv : numpy.ndarray, optional
+            Variational parameter lambda of words-topic distribution. If not supplied, it will take current value.
+        nu2_kv : numpy.ndarray, optional
+            Variational parameter nu2 of words-topic distribution. If not supplied, it will take current value.
         subsample_ratio : float, optional
             Percentage of the whole corpus represented by the passed `corpus` argument (in case this was a sample).
             Set to 1.0 if the whole corpus was passed.This is used as a multiplicative factor to scale the likelihood
@@ -264,9 +360,14 @@ class LdaCorrelatedModel(LdaModel):
             The variational bound score calculated for each document.
 
         """
+        if lambda_kv is None:
+            lambda_kv = self.lambda_kv
+
+        if nu2_kv is None:
+            nu2_kv = self.nu2_kv
+
         score = 0.0
-        _lambda = self.state.get_lambda()
-        Elogbeta = dirichlet_expectation(_lambda)
+        Elogbeta = self.get_Elogbeta(lambda_kv, nu2_kv)
 
         for d, doc in enumerate(corpus):  # stream the input doc-by-doc, in case it's too large to fit in RAM
             if d % self.chunksize == 0:
@@ -292,16 +393,17 @@ class LdaCorrelatedModel(LdaModel):
         # that the likelihood is always roughly on the same scale.
         score *= subsample_ratio
 
-        # E[log p(beta | eta) - log q (beta | lambda)]; assumes eta is a scalar
-        score += np.sum((self.eta - _lambda) * Elogbeta)
-        score += np.sum(gammaln(_lambda) - gammaln(self.eta))
+        # E[log p(beta | mu, Sigma)]
+        Elogpbeta_k = np.zeros(self.num_topics, dtype=self.dtype)
+        Elogpbeta_k += 0.5 * np.log(np.prod(self.sigma2_inverse_kv, 1))
+        Elogpbeta_k -= 0.5 * np.sum(nu2_kv * self.sigma2_inverse_kv, 1)
+        Elogpbeta_k -= 0.5 * np.sum((lambda_kv - self.mu_kv) * self.sigma2_inverse_kv * (lambda_kv - self.mu_kv), 1)
 
-        if np.ndim(self.eta) == 0:
-            sum_eta = self.eta * self.num_terms
-        else:
-            sum_eta = np.sum(self.eta)
+        # E[log q(beta | lambda, nu2)]
+        Elogqbeta_k = np.zeros(self.num_topics, dtype=self.dtype)
+        Elogqbeta_k -= 0.5 * (np.sum(np.log(nu2_kv), 1) + self.num_terms)
 
-        score += np.sum(gammaln(sum_eta) - gammaln(np.sum(_lambda, 1)))
+        score += np.sum(Elogpbeta_k - Elogqbeta_k)
 
         return score
 
@@ -345,7 +447,7 @@ class LdaCorrelatedModel(LdaModel):
 
         shown = []
 
-        topic = self.state.get_lambda()
+        topic = self.get_beta(self.lambda_kv, self.nu2_kv)
         for i in chosen_topics:
             topic_ = topic[i]
             topic_ = topic_ / topic_.sum()  # normalize to probability distribution
@@ -369,5 +471,5 @@ class LdaCorrelatedModel(LdaModel):
             The probability for each word in each topic, shape (`num_topics`, `vocabulary_size`).
 
         """
-        topics = self.state.get_lambda()
+        topics = self.get_beta(self.lambda_kv, self.nu2_kv)
         return topics / topics.sum(axis=1)[:, None]
